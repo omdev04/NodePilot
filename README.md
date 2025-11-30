@@ -8,7 +8,7 @@ Perfect for freelancers, indie devs, and VPS users who want a super-simple, supe
 ---
 
 <p align="center">
-  <img src="https://github.com/omdev04/NodePilot/blob/main/frontend/public/Logo/Full_logo.png" width="200" />
+  <img src="https://github.com/omdev04/NodePilot/blob/main/frontend/public/Logo/Full_logo.png" width="500 height=500" />
 </p>
 
 <p align="center">
@@ -362,4 +362,5 @@ MIT License — Free for personal & commercial use.
 # 👉 Want a matching **GitHub banner + logo kit** for NodePilot?
 
 Bol, main turant generate kar deta hoon!
+
 
