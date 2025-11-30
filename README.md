@@ -427,6 +427,8 @@ For issues and questions, please open a GitHub issue.
 ---
 
 **Built with ❤️ using Node.js, Fastify, Next.js, PM2, and SQLite**
-#   N o d e P i l o t  
- #   N o d e P i l o t  
+#   N o d e P i l o t 
+ 
+ #   N o d e P i l o t 
+ 
  
