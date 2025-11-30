@@ -1,0 +1,28 @@
+[Unit]
+Description=NodePilot Backend API
+Documentation=https://github.com/yourrepo/nodepilot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/deployer/backend
+ExecStart=/usr/bin/node /opt/deployer/backend/dist/index.js
+Restart=always
+RestartSec=10
+
+# Environment
+Environment=NODE_ENV=production
+Environment=PORT=3001
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nodepilot-backend
+
+[Install]
+WantedBy=multi-user.target

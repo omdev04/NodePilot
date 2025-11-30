@@ -1,0 +1,10 @@
+[Unit]
+Description=DEPRECATED: nodepilot-frontend.service (use nodepilot-frontend.service instead)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+
+[Install]
+WantedBy=multi-user.target
