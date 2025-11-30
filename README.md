@@ -355,13 +355,6 @@ MIT License — Free for personal & commercial use.
 
 # 💙 Made with passion
 
-**Node.js • Fastify • Next.js • PM2 • SQLite**
-
----
-
-# 👉 Want a matching **GitHub banner + logo kit** for NodePilot?
-
-Bol, main turant generate kar deta hoon!
 
 
 
