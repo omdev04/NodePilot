@@ -1,51 +1,80 @@
-# 🚀 NodePilot - PM2 Based Auto Deployment System
+# **🔥 NodePilot — Lightweight PM2-Based Deployment Panel**
 
-A lightweight, Dokploy-inspired deployment platform that enables one-click deployment of Node.js applications using PM2. No Docker required!
+### *Deploy Node.js apps in seconds. No Docker, no complexity — just pure speed.*
 
-## ✨ Features
+A modern, ultra-light deployment platform inspired by Dokploy but built **specifically for PM2 + ZIP deployment workflows**.
+Perfect for freelancers, indie devs, and VPS users who want a super-simple, super-fast deployment experience.
 
-- 🎯 **One-Click Deployment** - Upload ZIP, configure, and deploy
-- 🔄 **PM2 Process Management** - Start, stop, restart, and monitor processes
-- 📊 **System Monitoring** - Real-time CPU, RAM, and disk usage
-- 📝 **Live Logs** - View application logs in real-time
-- 🔐 **JWT Authentication** - Secure admin access
-- 📦 **Auto Dependencies** - Automatic `npm install` on deployment
-- 🎨 **Clean UI** - Modern, Dokploy-style interface
-- ⚡ **Lightweight** - Uses <100MB RAM
+---
 
-## 📋 Requirements
+<p align="center">
+  <img src="https://github.com/omdev04/NodePilot/frontend/public/Logo/Full_logo.png" width="200" />
+</p>
 
-- **Node.js** >= 18.0.0
-- **Ubuntu/Debian** Linux (recommended)
-- **PM2** (installed globally)
-- **Nginx** (for production reverse proxy)
+<p align="center">
+  <b>One-Click Deployment • PM2 Manager • Live Logs • System Monitoring • Zero-Docker</b>
+</p>
 
-## 🛠️ Installation
+---
 
-### 1. Clone Repository
+# ⚡ Features
+
+* 🚀 **One-Click Deployment** — Upload ZIP → Auto extract → Auto install → Run
+* 🔥 **Pure PM2 Runtime** — No Docker, no containers, zero overhead
+* 📦 **Auto Dependencies** — Automatically runs `npm install`
+* 🧠 **Port Auto-Detection** — Detects real running port automatically
+* 📊 **System Dashboard** — CPU, RAM, Disk, and PM2 metrics
+* 📝 **Real-time Logs** — WebSocket powered log streaming
+* 🔐 **JWT Authentication** — Secure admin access
+* 🎛️ **Modern UI** — Clean, Dokploy-style interface
+* ⚡ **Lightweight** — Uses less than **100MB RAM**
+
+---
+
+# 📁 Project Structure
+
+```
+NodePilot/
+├── backend/
+│   ├── src/
+│   │   ├── routes/
+│   │   ├── services/
+│   │   ├── middleware/
+│   │   ├── utils/
+│   │   └── index.ts
+│   ├── package.json
+│   └── tsconfig.json
+├── frontend/
+│   ├── app/
+│   ├── components/
+│   ├── lib/
+│   └── package.json
+├── projects/               # Deployed apps stored here
+└── package.json
+```
+
+---
+
+# 🛠️ Installation
+
+## 1. Clone Repository
 
 ```bash
 cd /opt
-git clone <your-repo-url> deployer
-cd deployer
+git clone <your-repo-url> nodepilot
+cd nodepilot
 ```
 
-### 2. Install Dependencies
+## 2. Install Dependencies
 
 ```bash
-# Install root dependencies
 npm install
 
-# Install backend dependencies
-cd backend
-npm install
-
-# Install frontend dependencies
-cd ../frontend
-npm install
+cd backend && npm install
+cd ../frontend && npm install
 ```
 
-### 3. Configure Environment
+## 3. Configure Environment
 
 ```bash
 cd backend
@@ -53,110 +82,92 @@ cp .env.example .env
 nano .env
 ```
 
-**Important:** Change these values in `.env`:
+Example:
+
 ```env
-JWT_SECRET=your-super-secret-jwt-key-CHANGE-THIS
+JWT_SECRET=super-secret-key-change-me
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=secure-password-CHANGE-THIS
-PROJECTS_DIR=/opt/deployer/projects
+ADMIN_PASSWORD=change-this
+PROJECTS_DIR=/opt/nodepilot/projects
 ```
 
-### 4. Build Applications
+## 4. Build Project
 
 ```bash
-# From root directory
 npm run build
 ```
 
-### 5. Initialize Database
+## 5. Initialize Database
 
 ```bash
 cd backend
 npm run db:init
 ```
 
-## 🚀 Running the Application
+---
 
-### Development Mode
+# 🚀 Running NodePilot
+
+## Development Mode
 
 ```bash
-# Terminal 1 - Backend
+# Backend
 cd backend
 npm run dev
 
-# Terminal 2 - Frontend
+# Frontend
 cd frontend
 npm run dev
 ```
 
-Access at:
-- Frontend: `http://localhost:3000`
-- Backend API: `http://localhost:3001`
+* Frontend: `http://localhost:3000`
+* Backend: `http://localhost:3001`
 
-### Production Mode with PM2
+## Production Mode (PM2)
 
 ```bash
-# Start backend
-cd /opt/deployer/backend
+cd backend
 pm2 start npm --name "nodepilot-backend" -- start
 
-# Start frontend
-cd /opt/deployer/frontend
+cd ../frontend
 pm2 start npm --name "nodepilot-frontend" -- start
 
-# Save PM2 configuration
 pm2 save
-
-# Enable PM2 startup on boot
 pm2 startup
 ```
 
-## 🔧 Production Setup
+---
 
-### Nginx Configuration
+# 🔧 Nginx Setup (Recommended)
 
-Create `/etc/nginx/sites-available/nodepilot`:
+Create file:
+`/etc/nginx/sites-available/nodepilot`
 
 ```nginx
 server {
     listen 80;
     server_name deploy.yourdomain.com;
 
-    # Frontend
     location / {
         proxy_pass http://localhost:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
     }
 
-    # Backend API
     location /api {
         proxy_pass http://localhost:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-        
         client_max_body_size 200M;
-    }
-
-    # WebSocket support for logs
-    location /api/project {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 86400;
     }
 }
 ```
 
-Enable and restart Nginx:
+Enable:
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/nodepilot /etc/nginx/sites-enabled/
@@ -164,271 +175,190 @@ sudo nginx -t
 sudo systemctl restart nginx
 ```
 
-### SSL with Certbot
+### SSL (Optional)
 
 ```bash
 sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d deploy.yourdomain.com
 ```
 
-### Systemd Service (Alternative to PM2)
+---
 
-Create `/etc/systemd/system/nodepilot-backend.service`:
+# 🧪 API Reference
 
-```ini
-[Unit]
-Description=NodePilot Backend
-After=network.target
+## 🔐 Login
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/deployer/backend
-ExecStart=/usr/bin/node /opt/deployer/backend/dist/index.js
-Restart=always
-Environment=NODE_ENV=production
+**POST** `/api/auth/login`
 
-[Install]
-WantedBy=multi-user.target
-```
-
-Create `/etc/systemd/system/nodepilot-frontend.service`:
-
-```ini
-[Unit]
-Description=NodePilot Frontend
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/deployer/frontend
-ExecStart=/usr/bin/npm start
-Restart=always
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-
-```bash
-sudo systemctl enable nodepilot-backend nodepilot-frontend
-sudo systemctl start nodepilot-backend nodepilot-frontend
-```
-
-## 📚 API Documentation
-
-### Authentication
-
-#### POST `/api/auth/login`
 ```json
-{
-  "username": "admin",
-  "password": "password"
-}
+{ "username": "admin", "password": "password" }
 ```
 
 Response:
+
 ```json
 {
-  "token": "jwt-token",
-  "user": {
-    "id": 1,
-    "username": "admin"
-  }
+  "token": "jwt",
+  "user": { "username": "admin" }
 }
 ```
 
-### Project Management
+---
 
-#### POST `/api/project/create`
-- **Content-Type**: `multipart/form-data`
-- **Headers**: `Authorization: Bearer <token>`
-- **Fields**:
-  - `file`: ZIP file
-  - `projectName`: Project identifier
-  - `displayName`: Display name
-  - `startCommand`: Command to start app
-  - `port`: (optional) Port number
+## 📦 Project APIs
 
-#### GET `/api/project/list`
-Returns all projects with PM2 status
+### Create Project
 
-#### GET `/api/project/:id`
-Get project details
+**POST** `/api/project/create`
+`multipart/form-data`
 
-#### POST `/api/project/:id/start`
-Start project
+```
+file: project.zip  
+projectName: myapp  
+startCommand: npm start  
+```
 
-#### POST `/api/project/:id/stop`
-Stop project
+### Get All Projects
 
-#### POST `/api/project/:id/restart`
-Restart project
+**GET** `/api/project/list`
 
-#### POST `/api/project/:id/deploy`
-Redeploy with new ZIP
+### Deploy ZIP (Redeploy)
 
-#### DELETE `/api/project/:id`
-Delete project
+**POST** `/api/project/:id/deploy`
 
-#### GET `/api/project/:id/logs`
-Get project logs
+### Logs
 
-### System Information
+**GET** `/api/project/:id/logs`
 
-#### GET `/api/system/info`
-Get system stats (CPU, RAM, Disk, PM2 processes)
+### Actions
 
-#### GET `/api/system/metrics`
-Get real-time metrics
+```
+POST /api/project/:id/start  
+POST /api/project/:id/stop  
+POST /api/project/:id/restart  
+DELETE /api/project/:id  
+```
 
-## 📖 Usage Guide
+---
 
-### Creating a Project
+## 🖥️ System APIs
 
-1. **Login** with admin credentials
-2. Click **"New Project"**
-3. **Upload** your Node.js project as ZIP
-4. **Configure**:
-   - Project Name (alphanumeric)
-   - Display Name
-   - Start Command (`npm start`, `node index.js`, etc.)
-   - Port (optional)
-5. Click **"Deploy Project"**
+### System Info
 
-### Managing Projects
+**GET** `/api/system/info`
 
-- **View All**: Navigate to "Projects" page
-- **Start/Stop**: Click action buttons
-- **Restart**: Restart running process
-- **View Logs**: Click "View Details" → "Logs" tab
-- **Redeploy**: Upload new ZIP in project detail page
-- **Delete**: Remove project completely
+### Real-Time Metrics
 
-### Monitoring
+**GET** `/api/system/metrics`
 
-The dashboard shows:
-- CPU usage
-- Memory usage
-- Disk usage
-- Active projects count
-- Per-project metrics (CPU, RAM, uptime)
+---
 
-## 🔒 Security Best Practices
+# 🧩 Usage Guide
 
-1. **Change default credentials** immediately
-2. Use **strong JWT_SECRET** in production
-3. Enable **firewall** (allow only 80/443)
-4. Use **SSL/TLS** (HTTPS only)
-5. **Limit upload size** (default: 200MB)
-6. Run behind **Nginx reverse proxy**
-7. Regular **system updates**
+### Create a Project
+
+1. Login
+2. Click **New Project**
+3. Upload ZIP
+4. Enter
+
+   * Name
+   * Start Command
+   * Port (optional)
+5. Hit **Deploy**
+
+### Manage Projects
+
+* Start / Stop / Restart
+* View logs
+* Redeploy
+* Delete
+
+### Monitor Server
+
+Dashboard shows:
+
+* CPU
+* RAM
+* Disk
+* Uptime
+* Active processes
+
+---
+
+# 🔒 Security Best Practices
+
+* Change default admin password
+* Use strong `JWT_SECRET`
+* Reverse proxy behind Nginx
+* Enable firewall
 
 ```bash
-# UFW Firewall
 sudo ufw allow 22
 sudo ufw allow 80
 sudo ufw allow 443
 sudo ufw enable
 ```
 
-## 🐛 Troubleshooting
+* Use HTTPS only
+
+---
+
+# 🐛 Troubleshooting
 
 ### Port Already in Use
 
 ```bash
-# Check what's using the port
-sudo lsof -i :3001
 sudo lsof -i :3000
-
-# Kill process
 sudo kill -9 <PID>
 ```
 
-### PM2 Not Starting Projects
+### PM2 Issues
 
 ```bash
-# Check PM2 logs
 pm2 logs
-
-# Check project logs
-pm2 logs nodepilot-my-project
-
-# Restart PM2
 pm2 restart all
 ```
 
-### Database Issues
+### Permissions Fix
 
 ```bash
-cd /opt/deployer/backend
-npm run db:init
+sudo chown -R $USER:$USER /opt/nodepilot
 ```
-
-### Permission Issues
-
-```bash
-sudo chown -R $USER:$USER /opt/deployer
-sudo chmod -R 755 /opt/deployer
-```
-
-## 📁 Project Structure
-
-```
-NodePilot/
-├── backend/
-│   ├── src/
-│   │   ├── routes/          # API routes
-│   │   ├── services/        # Business logic
-│   │   ├── middleware/      # Auth middleware
-│   │   ├── utils/           # Utilities
-│   │   └── index.ts         # Entry point
-│   ├── package.json
-│   └── tsconfig.json
-├── frontend/
-│   ├── app/                 # Next.js 14 App Router
-│   │   ├── dashboard/
-│   │   ├── projects/
-│   │   └── login/
-│   ├── components/          # UI components
-│   ├── lib/                 # Utils & API client
-│   └── package.json
-├── projects/                # Deployed projects
-└── package.json
-```
-
-## 🎯 Roadmap
-
-- [ ] Docker support (optional)
-- [ ] GitHub/GitLab integration
-- [ ] Environment variables editor
-- [ ] Domain management
-- [ ] SSL certificate automation
-- [ ] Multi-user support
-- [ ] Webhooks for CI/CD
-- [ ] Database backups
-- [ ] Custom domains per project
-
-## 📄 License
-
-MIT License - feel free to use for personal or commercial projects.
-
-## 🤝 Contributing
-
-Contributions welcome! Please open an issue or PR.
-
-## 💬 Support
-
-For issues and questions, please open a GitHub issue.
 
 ---
 
-**Built with ❤️ using Node.js, Fastify, Next.js, PM2, and SQLite**
-#   N o d e P i l o t 
- 
- #   N o d e P i l o t 
- 
- 
+# 🌍 Roadmap
+
+* [ ] Environment Variables Editor
+* [ ] GitHub/GitLab Deployments
+* [ ] Custom Domain + Auto SSL
+* [ ] Multi-User Access
+* [ ] Webhook Deploy
+* [ ] Backups UI
+* [ ] File browser
+* [ ] Template projects
+
+---
+
+# 🤝 Contributing
+
+Pull requests and feature suggestions are welcome!
+
+---
+
+# 📜 License
+
+MIT License — Free for personal & commercial use.
+
+---
+
+# 💙 Made with passion
+
+**Node.js • Fastify • Next.js • PM2 • SQLite**
+
+---
+
+# 👉 Want a matching **GitHub banner + logo kit** for NodePilot?
+
+Bol, main turant generate kar deta hoon!
