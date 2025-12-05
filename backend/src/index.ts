@@ -10,14 +10,26 @@ import { initDatabase } from './utils/database';
 import authRoutes from './routes/auth';
 import projectRoutes from './routes/projects';
 import systemRoutes from './routes/system';
+import gitRoutes from './routes/git';
+import oauthRoutes from './routes/oauth';
 
 dotenv.config();
+
+// Debug: Log if OAuth credentials are loaded
+if (process.env.GITHUB_CLIENT_ID) {
+  console.log('✅ GitHub OAuth credentials loaded');
+} else {
+  console.log('⚠️  GitHub OAuth credentials NOT loaded');
+}
 
 const PORT = parseInt(process.env.PORT || '9001', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 
 const fastify = Fastify({
-  logger: true,
+  logger: {
+    level: process.env.NODE_ENV === 'production' ? 'error' : 'warn',
+    // Only log errors and warnings, skip request/response logs
+  },
   bodyLimit: parseInt(process.env.MAX_UPLOAD_SIZE || '209715200', 10),
 });
 
@@ -65,6 +77,8 @@ async function start() {
     await fastify.register(authRoutes, { prefix: '/api/auth' });
     await fastify.register(projectRoutes, { prefix: '/api/project' });
     await fastify.register(systemRoutes, { prefix: '/api/system' });
+    await fastify.register(gitRoutes, { prefix: '/api/git' });
+    await fastify.register(oauthRoutes, { prefix: '/api/oauth' });
 
     // Start server
     await fastify.listen({ port: PORT, host: HOST });

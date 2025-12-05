@@ -4,14 +4,27 @@ A lightweight, Dokploy-inspired deployment platform that enables one-click deplo
 
 ## ✨ Features
 
-- 🎯 **One-Click Deployment** - Upload ZIP, configure, and deploy
+### **Deployment**
+- 🎯 **ZIP Upload** - Drag & drop deployment for quick prototypes
+- 🔀 **Git Deploy** - Deploy directly from GitHub/GitLab/Bitbucket *(NEW!)*
+- 🪝 **Auto-Deploy Webhooks** - Push to deploy automatically *(NEW!)*
+- 🌿 **Branch Management** - Switch branches with one click *(NEW!)*
+- 🔨 **Build Pipeline** - Support for TypeScript, Webpack, Next.js, etc. *(NEW!)*
+- ⏮️ **Rollback** - Restore previous versions instantly
+
+### **Management**
 - 🔄 **PM2 Process Management** - Start, stop, restart, and monitor processes
 - 📊 **System Monitoring** - Real-time CPU, RAM, and disk usage
 - 📝 **Live Logs** - View application logs in real-time
 - 🔐 **JWT Authentication** - Secure admin access
 - 📦 **Auto Dependencies** - Automatic `npm install` on deployment
+- 🔒 **SSL/HTTPS** - Automatic SSL certificate provisioning
+
+### **Interface**
 - 🎨 **Clean UI** - Modern, Dokploy-style interface
 - ⚡ **Lightweight** - Uses <100MB RAM
+- 🌓 **Dark Mode** - Easy on the eyes
+- 📱 **Responsive** - Works on all devices
 
 ## 📋 Requirements
 
@@ -400,17 +413,50 @@ NodePilot/
 └── package.json
 ```
 
+## 🆕 Git Deploy Feature (NEW!)
+
+NodePilot now supports **Git-based deployments** with auto-deploy webhooks!
+
+### **Quick Start with Git**
+
+1. Go to **Create Project** → **Git Deploy** tab
+2. Enter your Git repository URL: `https://github.com/user/repo.git`
+3. Choose branch, start command, and optional build command
+4. Click **Deploy Project**
+5. Set up webhooks for auto-deploy on push
+
+### **Features**
+- ✅ Deploy from GitHub, GitLab, Bitbucket
+- ✅ Automatic dependency installation
+- ✅ Build command support (TypeScript, Webpack, etc.)
+- ✅ Branch switching with one click
+- ✅ Auto-deploy via webhooks
+- ✅ Rollback to previous versions
+- ✅ Production-grade security
+
+### **Documentation**
+- 📖 [Complete Guide](./GIT_DEPLOY_GUIDE.md) - Full documentation
+- 🚀 [Quick Start](./GIT_DEPLOY_QUICKSTART.md) - Deploy in 3 minutes
+- 🧪 [Testing Checklist](./GIT_DEPLOY_TESTING.md) - 40-point test guide
+- 📋 [Implementation](./GIT_DEPLOY_IMPLEMENTATION.md) - Technical details
+
+---
+
 ## 🎯 Roadmap
 
+- [x] **Git Deploy** - Deploy from GitHub/GitLab/Bitbucket ✅
+- [x] **Webhooks** - Auto-deploy on push ✅
+- [x] **Branch Management** - Switch branches dynamically ✅
+- [x] **Build Pipeline** - TypeScript, Next.js, etc. ✅
+- [x] **Environment Variables Editor** - Full CRUD UI ✅
+- [x] **Domain Management** - SSL automation ✅
+- [x] **Rollback Support** - Instant restore ✅
 - [ ] Docker support (optional)
-- [ ] GitHub/GitLab integration
-- [ ] Environment variables editor
-- [ ] Domain management
-- [ ] SSL certificate automation
-- [ ] Multi-user support
-- [ ] Webhooks for CI/CD
-- [ ] Database backups
-- [ ] Custom domains per project
+- [ ] Multi-user support with roles
+- [ ] Database backups automation
+- [ ] Git submodules support
+- [ ] Monorepo support (Nx, Turborepo)
+- [ ] Pull request preview deployments
 
 ## 📄 License
 
@@ -427,6 +473,8 @@ For issues and questions, please open a GitHub issue.
 ---
 
 **Built with ❤️ using Node.js, Fastify, Next.js, PM2, and SQLite**
-#   N o d e P i l o t  
- #   N o d e P i l o t  
+#   N o d e P i l o t 
+ 
+ #   N o d e P i l o t 
+ 
  

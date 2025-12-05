@@ -51,6 +51,14 @@ export class PM2Service {
       watch: config.watch ?? false,
       max_memory_restart: config.max_memory_restart || '500M',
       env: config.env || {},
+      // Prevent restart loops - app must run for 10s to be considered stable
+      min_uptime: 10000,
+      // Max 15 restarts within 1 minute before stopping
+      max_restarts: 15,
+      // Always merge logs to both PM2 default location and project directory
+      merge_logs: true,
+      // Log date format
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
     };
 
     if (config.args) {
@@ -59,8 +67,14 @@ export class PM2Service {
 
     if (config.interpreter) {
       processConfig.interpreter = config.interpreter;
+      // On Windows, when interpreter is 'none', also set interpreter_args
+      // to ensure PM2 doesn't default to node interpreter
+      if (config.interpreter === 'none') {
+        processConfig.interpreter_args = 'none';
+      }
     }
 
+    // Set log file paths - PM2 will write to both its default location and these
     if (config.error_file) {
       processConfig.error_file = config.error_file;
     }

@@ -25,8 +25,16 @@ async function initSqlJsDb() {
 // Save database to file
 export function saveDb() {
   if (db) {
-    const data = db.export();
-    fs.writeFileSync(DB_PATH, data);
+    try {
+      const data = db.export();
+      const buffer = Buffer.from(data);
+      fs.writeFileSync(DB_PATH, buffer);
+      console.log('✅ Database saved to disk:', DB_PATH);
+    } catch (error) {
+      console.error('❌ Failed to save database:', error);
+    }
+  } else {
+    console.error('❌ Database not initialized, cannot save');
   }
 }
 
@@ -57,11 +65,14 @@ export const dbWrapper = {
       return results;
     },
     run: (...params: any[]) => {
+      console.log('🔹 Database run:', sql.substring(0, 100));
       const stmt = db.prepare(sql);
       const cleaned = params.map(p => typeof p === 'undefined' ? null : p);
       stmt.bind(cleaned);
       stmt.step();
       stmt.free();
+      
+      console.log('🔹 Calling saveDb after query execution...');
       saveDb();
       
       // Get last insert rowid for INSERT statements
@@ -105,6 +116,10 @@ export async function initDatabase() {
       password TEXT NOT NULL,
       email TEXT,
       avatar_url TEXT,
+      oauth_provider TEXT,
+      oauth_token TEXT,
+      oauth_refresh_token TEXT,
+      oauth_expires_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -121,6 +136,14 @@ export async function initDatabase() {
       env_vars TEXT,
       pm2_name TEXT NOT NULL,
       status TEXT DEFAULT 'stopped',
+      deploy_method TEXT DEFAULT 'zip',
+      git_url TEXT,
+      git_branch TEXT,
+      install_command TEXT DEFAULT 'npm install',
+      build_command TEXT,
+      webhook_secret TEXT,
+      last_commit TEXT,
+      last_deployed_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -178,6 +201,12 @@ export interface User {
   id: number;
   username: string;
   password: string;
+  email?: string;
+  avatar_url?: string;
+  oauth_provider?: string;
+  oauth_token?: string;
+  oauth_refresh_token?: string;
+  oauth_expires_at?: string;
   created_at: string;
 }
 
@@ -191,6 +220,14 @@ export interface Project {
   env_vars?: string;
   pm2_name: string;
   status: string;
+  deploy_method?: string;
+  git_url?: string;
+  git_branch?: string;
+  install_command?: string;
+  build_command?: string;
+  webhook_secret?: string;
+  last_commit?: string;
+  last_deployed_at?: string;
   created_at: string;
   updated_at: string;
 }

@@ -3,13 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DashboardSidebar } from '@/components/ui/dashboard-sidebar';
-import { ThemeToggle } from '@/components/ui/theme-toggle';
 import api from '@/lib/api';
 import { formatBytes, formatUptime } from '@/lib/utils';
-import { Activity, Cpu, HardDrive, MemoryStick, LogOut, Plus, FolderOpen, Bell, User, TrendingUp, Package, RefreshCw } from 'lucide-react';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -65,29 +61,22 @@ export default function DashboardPage() {
     return (
       <div className="flex min-h-screen w-full bg-gray-50 dark:bg-gray-950">
         <DashboardSidebar open={sidebarOpen} setOpen={setSidebarOpen} />
-        <div className="flex-1 overflow-auto">
-          <div className="sticky top-0 z-10 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 px-6 py-4">
-            <div className="animate-pulse flex justify-between">
+        <main className="flex-1 p-8 overflow-y-auto">
+          <div className="max-w-7xl mx-auto">
+            <div className="animate-pulse space-y-8">
               <div className="space-y-2">
-                <div className="h-8 w-48 bg-gray-200 dark:bg-gray-800 rounded"></div>
-                <div className="h-4 w-64 bg-gray-200 dark:bg-gray-800 rounded"></div>
+                <div className="h-4 w-32 bg-gray-200 dark:bg-gray-800 rounded"></div>
+                <div className="h-10 w-64 bg-gray-200 dark:bg-gray-800 rounded"></div>
               </div>
-              <div className="flex gap-4">
-                <div className="h-10 w-24 bg-gray-200 dark:bg-gray-800 rounded"></div>
-                <div className="h-10 w-10 bg-gray-200 dark:bg-gray-800 rounded"></div>
-                <div className="h-10 w-10 bg-gray-200 dark:bg-gray-800 rounded"></div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-32 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"></div>
+                ))}
               </div>
+              <div className="h-96 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"></div>
             </div>
           </div>
-          <main className="p-6">
-            <div className="animate-pulse grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-32 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"></div>
-              ))}
-            </div>
-            <div className="animate-pulse h-96 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"></div>
-          </main>
-        </div>
+        </main>
       </div>
     );
   }
@@ -96,99 +85,69 @@ export default function DashboardPage() {
     <div className="flex min-h-screen w-full bg-gray-50 dark:bg-gray-950">
       <DashboardSidebar open={sidebarOpen} setOpen={setSidebarOpen} />
       
-      <div className="flex-1 overflow-auto">
-        {/* Header */}
-        <div className="sticky top-0 z-10 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
-              <p className="text-gray-600 dark:text-gray-400 mt-1">Monitor your deployment system</p>
-            </div>
-            <div className="flex items-center gap-4">
+      <main className="flex-1 p-8 overflow-y-auto">
+        <div className="max-w-7xl mx-auto">
+          {/* Breadcrumbs */}
+          <div className="flex flex-wrap gap-2 mb-2">
+            <Link href="/" className="text-gray-500 dark:text-gray-400 text-base font-medium leading-normal hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
+              NodePilot
+            </Link>
+            <span className="text-gray-500 dark:text-gray-400 text-base font-medium leading-normal">/</span>
+            <span className="text-gray-900 dark:text-gray-100 text-base font-medium leading-normal">Dashboard</span>
+          </div>
+
+          {/* Page Heading */}
+          <div className="flex flex-wrap justify-between gap-3 mb-8">
+            <h1 className="text-gray-900 dark:text-gray-100 text-4xl font-black leading-tight tracking-[-0.033em] min-w-72">Dashboard</h1>
+            <div className="flex items-center gap-3">
               <button 
                 onClick={handleRefresh}
                 disabled={isRefreshing}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:opacity-50 h-fit"
                 title="Refresh data"
               >
-                <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                <span className={`material-symbols-outlined text-lg ${isRefreshing ? 'animate-spin' : ''}`}>refresh</span>
                 <span className="text-sm font-medium">Refresh</span>
-              </button>
-              <button className="relative p-2 rounded-lg bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors">
-                <Bell className="h-5 w-5" />
-              </button>
-              <ThemeToggle />
-              <button 
-                onClick={handleLogout}
-                className="p-2 rounded-lg bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
-              >
-                <LogOut className="h-5 w-5" />
               </button>
             </div>
           </div>
-        </div>
-
-        <main className="p-6">
           {/* System Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                  <Cpu className="h-5 w-5 text-gray-900 dark:text-gray-100" />
-                </div>
-              </div>
-              <h3 className="font-medium text-gray-600 dark:text-gray-400 mb-1">CPU Usage</h3>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{systemInfo?.cpu.usage}%</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 truncate">{systemInfo?.cpu.brand}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div className="flex flex-col gap-2 rounded-xl p-6 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/50">
+              <p className="text-gray-900 dark:text-gray-100 text-base font-medium leading-normal">CPU Usage</p>
+              <p className="text-gray-900 dark:text-gray-100 tracking-light text-2xl font-bold leading-tight">{systemInfo?.cpu.usage}%</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{systemInfo?.cpu.brand}</p>
             </div>
 
-            <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                  <MemoryStick className="h-5 w-5 text-gray-900 dark:text-gray-100" />
-                </div>
-              </div>
-              <h3 className="font-medium text-gray-600 dark:text-gray-400 mb-1">Memory</h3>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{systemInfo?.memory.usagePercent}%</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <div className="flex flex-col gap-2 rounded-xl p-6 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/50">
+              <p className="text-gray-900 dark:text-gray-100 text-base font-medium leading-normal">Memory</p>
+              <p className="text-gray-900 dark:text-gray-100 tracking-light text-2xl font-bold leading-tight">{systemInfo?.memory.usagePercent}%</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
                 {formatBytes(systemInfo?.memory.used)} / {formatBytes(systemInfo?.memory.total)}
               </p>
             </div>
 
-            <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                  <HardDrive className="h-5 w-5 text-gray-900 dark:text-gray-100" />
-                </div>
-              </div>
-              <h3 className="font-medium text-gray-600 dark:text-gray-400 mb-1">Disk Usage</h3>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{systemInfo?.disk[0]?.usagePercent}%</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <div className="flex flex-col gap-2 rounded-xl p-6 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/50">
+              <p className="text-gray-900 dark:text-gray-100 text-base font-medium leading-normal">Disk Usage</p>
+              <p className="text-gray-900 dark:text-gray-100 tracking-light text-2xl font-bold leading-tight">{systemInfo?.disk[0]?.usagePercent}%</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
                 {formatBytes(systemInfo?.disk[0]?.used)} / {formatBytes(systemInfo?.disk[0]?.size)}
               </p>
             </div>
 
-            <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-4">
-                <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                  <Activity className="h-5 w-5 text-gray-900 dark:text-gray-100" />
-                </div>
-              </div>
-              <h3 className="font-medium text-gray-600 dark:text-gray-400 mb-1">Active Projects</h3>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{systemInfo?.pm2.onlineProcesses}</p>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{systemInfo?.pm2.totalProcesses} total</p>
+            <div className="flex flex-col gap-2 rounded-xl p-6 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/50">
+              <p className="text-gray-900 dark:text-gray-100 text-base font-medium leading-normal">Active Projects</p>
+              <p className="text-gray-900 dark:text-gray-100 tracking-light text-2xl font-bold leading-tight">{systemInfo?.pm2.onlineProcesses}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{systemInfo?.pm2.totalProcesses} total</p>
             </div>
           </div>
 
-          {/* Recent Projects */}
-          <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Recent Projects</h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Your deployed applications</p>
-              </div>
+          {/* Recent Projects Table */}
+          <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900/50 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-gray-900 dark:text-gray-100 text-lg font-bold">All Projects</h3>
               <Link href="/projects">
-                <button className="text-sm text-gray-900 dark:text-gray-100 hover:text-gray-600 dark:hover:text-gray-400 font-medium">
+                <button className="text-sm text-gray-900 dark:text-gray-100 hover:text-gray-600 dark:hover:text-gray-400 font-medium transition-colors">
                   View all
                 </button>
               </Link>
@@ -196,60 +155,73 @@ export default function DashboardPage() {
 
             {projects.length === 0 ? (
               <div className="text-center py-12">
-                <img src="/Logo/trans.png" alt="NodePilot" className="h-12 w-17 mx-auto object-contain mb-4" />
+                <span className="material-symbols-outlined text-6xl text-gray-400 dark:text-gray-600 mb-4">folder_open</span>
                 <p className="text-gray-600 dark:text-gray-400 mb-4">No projects deployed yet</p>
                 <Link 
                   href="/projects/create"
-                  className="inline-flex items-center px-4 py-2 rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors"
                 >
-                  <Plus className="h-4 w-4 mr-2" />
+                  <span className="material-symbols-outlined">add</span>
                   Create Your First Project
                 </Link>
               </div>
             ) : (
-              <div className="space-y-3">
-                {projects.slice(0, 5).map((project) => (
-                  <div
-                    key={project.id}
-                    className="flex items-center justify-between p-4 rounded-lg border border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                  >
-                    <div className="flex items-center space-x-4 flex-1">
-                      <div className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg">
-                        <Package className="h-5 w-5 text-gray-900 dark:text-gray-100" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-semibold text-gray-900 dark:text-gray-100 truncate">{project.display_name}</h4>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{project.name}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-4">
-                      <div className="text-right">
-                        <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          project.pm2Status?.status === 'online'
-                            ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'
-                            : 'bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                        }`}>
-                          {project.pm2Status?.status || 'stopped'}
-                        </div>
-                        {project.pm2Status && (
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            CPU: {project.pm2Status.cpu}% | RAM: {formatBytes(project.pm2Status.memory)}
-                          </p>
-                        )}
-                      </div>
-                      <Link href={`/projects/${project.id}`}>
-                        <button className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 text-sm font-medium text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-                          View
-                        </button>
-                      </Link>
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400">
+                      <th className="p-3 text-sm font-semibold">Project Name</th>
+                      <th className="p-3 text-sm font-semibold">ID</th>
+                      <th className="p-3 text-sm font-semibold">Status</th>
+                      <th className="p-3 text-sm font-semibold">CPU</th>
+                      <th className="p-3 text-sm font-semibold">Memory</th>
+                      <th className="p-3 text-sm font-semibold">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                    {projects.slice(0, 5).map((project) => (
+                      <tr key={project.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                        <td className="p-3">
+                          <p className="text-gray-900 dark:text-gray-100 font-medium">{project.display_name}</p>
+                          <p className="text-sm text-gray-500 dark:text-gray-400">{project.name}</p>
+                        </td>
+                        <td className="p-3 text-gray-900 dark:text-gray-100/80">{project.id}</td>
+                        <td className="p-3">
+                          <span className={`inline-flex items-center gap-2 ${
+                            project.pm2Status?.status === 'online'
+                              ? 'text-green-600 dark:text-green-400'
+                              : project.pm2Status?.status === 'stopping' || project.pm2Status?.status === 'restarting'
+                              ? 'text-yellow-600 dark:text-yellow-400'
+                              : 'text-red-600 dark:text-red-400'
+                          }`}>
+                            <span className={`h-2 w-2 rounded-full ${
+                              project.pm2Status?.status === 'online'
+                                ? 'bg-green-600 dark:bg-green-400'
+                                : project.pm2Status?.status === 'stopping' || project.pm2Status?.status === 'restarting'
+                                ? 'bg-yellow-600 dark:bg-yellow-400'
+                                : 'bg-red-600 dark:bg-red-400'
+                            }`}></span>
+                            {project.pm2Status?.status || 'stopped'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-gray-900 dark:text-gray-100/80">{project.pm2Status?.cpu || 0}%</td>
+                        <td className="p-3 text-gray-900 dark:text-gray-100/80">{formatBytes(project.pm2Status?.memory || 0)}</td>
+                        <td className="p-3">
+                          <Link href={`/projects/${project.id}`}>
+                            <button className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-800 text-sm font-medium text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                              View
+                            </button>
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
-        </main>
-      </div>
+        </div>
+      </main>
     </div>
   );
 }

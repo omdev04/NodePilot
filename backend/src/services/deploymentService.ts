@@ -5,6 +5,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import unzipper from 'unzipper';
 import { pm2Service } from './pm2Service';
+import { gitService } from './gitService';
 import tar from 'tar';
 // Optional runtime dependency: archiver may not be installed in some environments
 let archiver: any = null;
@@ -26,6 +27,20 @@ export interface DeploymentConfig {
   port?: number;
   envVars?: Record<string, string>;
   zipPath?: string;
+}
+
+export interface GitDeploymentConfig {
+  projectName: string;
+  displayName: string;
+  gitUrl: string;
+  branch: string;
+  startCommand: string;
+  installCommand?: string;
+  buildCommand?: string;
+  port?: number;
+  envVars?: Record<string, string>;
+  oauthToken?: string;
+  oauthProvider?: 'github' | 'gitlab' | 'bitbucket';
 }
 
 export class DeploymentService {
@@ -238,8 +253,8 @@ export class DeploymentService {
 
     // Save to database (encrypt env vars before storing when provided)
     const result = db.prepare(`
-      INSERT INTO projects (name, display_name, path, start_command, port, env_vars, pm2_name, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO projects (name, display_name, path, start_command, port, env_vars, pm2_name, status, deploy_method)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       sanitizedName,
       config.displayName,
@@ -249,7 +264,8 @@ export class DeploymentService {
       // store only user-provided variables (null if none provided), encrypted if present
       userEnvVars ? encrypt(JSON.stringify(userEnvVars)) : null,
       pm2Name,
-      'running'
+      'running',
+      'zip'
     );
 
     if (userEnvVars) {
@@ -271,6 +287,319 @@ export class DeploymentService {
       .get(result.lastInsertRowid) as Project;
 
     return project;
+  }
+
+  async createProjectFromGit(config: GitDeploymentConfig): Promise<Project> {
+    await this.ensureProjectsDir();
+
+    const sanitizedName = this.sanitizeProjectName(config.projectName);
+    const projectPath = path.join(this.projectsDir, sanitizedName);
+    const pm2Name = `nodepilot-${sanitizedName}`;
+
+    // Check if project already exists
+    const existing = db
+      .prepare('SELECT id FROM projects WHERE name = ?')
+      .get(sanitizedName);
+
+    if (existing) {
+      throw new Error(`Project "${sanitizedName}" already exists`);
+    }
+
+    console.log(`🔄 Cloning repository for ${sanitizedName}...`);
+    
+    // Clone repository
+    const cloneResult = await gitService.cloneRepository({
+      repoUrl: config.gitUrl,
+      branch: config.branch,
+      targetPath: projectPath,
+      shallow: true,
+      depth: 1,
+      oauthToken: config.oauthToken,
+      oauthProvider: config.oauthProvider,
+    });
+
+    if (!cloneResult.success) {
+      throw new Error(`Git clone failed: ${cloneResult.message}`);
+    }
+
+    console.log(`✅ Repository cloned successfully`);
+
+    // Validate repository structure
+    const validation = await gitService.validateRepository(projectPath);
+    if (!validation.isValid) {
+      // Cleanup on validation failure
+      await fsPromises.rm(projectPath, { recursive: true, force: true });
+      throw new Error(`Repository validation failed: ${validation.errors.join(', ')}`);
+    }
+
+    if (validation.warnings.length > 0) {
+      console.warn(`⚠️  Warnings: ${validation.warnings.join(', ')}`);
+    }
+
+    // Install dependencies
+    const installCmd = config.installCommand || 'npm install';
+    console.log(`📦 Installing dependencies: ${installCmd}...`);
+    try {
+      await execAsync(installCmd, { 
+        cwd: projectPath,
+        timeout: 10 * 60 * 1000, // 10 minute timeout
+      });
+      console.log(`✅ Dependencies installed`);
+    } catch (error: any) {
+      console.error(`❌ Dependency installation failed:`, error.message);
+      throw new Error(`Dependency installation failed: ${error.message}`);
+    }
+
+    // Prepare environment variables BEFORE build
+    const envVarsForProcess = {
+      PORT: config.port?.toString() || '3000',
+      NODE_ENV: 'production',
+      ...(config.envVars || {}),
+    };
+
+    // Generate .env file BEFORE build (so build process can use it)
+    try {
+      const envLines = Object.entries(envVarsForProcess).map(([k, v]) => {
+        const needsQuotes = typeof v === 'string' && /\s|\n|\r|\t/.test(v);
+        const safeVal = (v || '').toString().replace(/"/g, '\\"');
+        return `${k}=${needsQuotes ? '"' + safeVal + '"' : safeVal}`;
+      }).join('\n');
+      await fsPromises.writeFile(path.join(projectPath, '.env'), envLines, { mode: 0o600 });
+      console.log(`✅ Environment variables written to .env file`);
+    } catch (error) {
+      console.warn('⚠️  Failed to write .env file:', error);
+    }
+
+    // Run build command if provided (with env vars available)
+    if (config.buildCommand) {
+      // Check if build command looks like a start command (common mistake)
+      const buildCmd = config.buildCommand.toLowerCase().trim();
+      const startsApp = buildCmd.includes('npm start') || 
+                        buildCmd.includes('npm run start') ||
+                        buildCmd.includes('node index') || 
+                        buildCmd.includes('node server') || 
+                        buildCmd.includes('node app') ||
+                        buildCmd.includes('node src') ||
+                        (buildCmd.includes('node ') && !buildCmd.includes('build'));
+      
+      if (startsApp) {
+        console.log(`⚠️  Build command looks like a start command, skipping: ${config.buildCommand}`);
+        console.log(`💡 Tip: Build commands are for compilation (e.g., 'npm run build', 'tsc'), not for starting the app`);
+        console.log(`💡 The start command should be in the "Start Command" field, not "Build Command"`);
+      } else {
+        console.log(`🔨 Building project: ${config.buildCommand}...`);
+        try {
+          await execAsync(config.buildCommand, { 
+            cwd: projectPath,
+            timeout: 15 * 60 * 1000, // 15 minute timeout
+            env: {
+              ...process.env,
+              ...envVarsForProcess,
+            }
+          });
+          console.log(`✅ Build completed`);
+        } catch (error: any) {
+          console.error(`❌ Build failed:`, error.message);
+          // Don't throw error for build failures - let the app try to start anyway
+          console.warn(`⚠️  Continuing despite build failure - app may still work`);
+        }
+      }
+    }
+
+    // Parse start command
+    const { script, args, interpreter } = this.parseStartCommand(config.startCommand);
+
+    const userEnvVars = config.envVars && Object.keys(config.envVars).length > 0 ? config.envVars : null;
+
+    // Get current commit info
+    const repoInfo = await gitService.getRepoInfo(projectPath);
+    const currentCommit = repoInfo.commit || 'unknown';
+
+    // Start PM2 process
+    console.log(`🚀 Starting PM2 process...`);
+    await pm2Service.startProcess({
+      name: pm2Name,
+      script,
+      args,
+      interpreter,
+      cwd: projectPath,
+      env: envVarsForProcess,
+      error_file: path.join(projectPath, 'error.log'),
+      out_file: path.join(projectPath, 'out.log'),
+    });
+
+    // Save to database
+    const result = db.prepare(`
+      INSERT INTO projects (
+        name, display_name, path, start_command, port, env_vars, pm2_name, status,
+        deploy_method, git_url, git_branch, install_command, build_command, last_commit, last_deployed_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `).run(
+      sanitizedName,
+      config.displayName,
+      projectPath,
+      config.startCommand,
+      config.port || null,
+      userEnvVars ? encrypt(JSON.stringify(userEnvVars)) : null,
+      pm2Name,
+      'running',
+      'git',
+      config.gitUrl,
+      config.branch,
+      config.installCommand || 'npm install',
+      config.buildCommand || null,
+      currentCommit
+    );
+
+    console.log(`✅ Git project ${sanitizedName} created successfully`);
+
+    // Add deployment record
+    const initialVersion = this.formatTimestamp(Date.now());
+    db.prepare(`
+      INSERT INTO deployments (project_id, version, status, notes)
+      VALUES (?, ?, ?, ?)
+    `).run(result.lastInsertRowid, initialVersion, 'success', `Initial Git deployment from ${config.branch} (${currentCommit})`);
+
+    const project = db
+      .prepare('SELECT * FROM projects WHERE id = ?')
+      .get(result.lastInsertRowid) as Project;
+
+    return project;
+  }
+
+  async redeployGitProject(
+    projectId: number, 
+    oauthToken?: string, 
+    oauthProvider?: 'github' | 'gitlab' | 'bitbucket'
+  ): Promise<void> {
+    const project = db
+      .prepare('SELECT * FROM projects WHERE id = ?')
+      .get(projectId) as Project;
+
+    if (!project) {
+      throw new Error('Project not found');
+    }
+
+    if (project.deploy_method !== 'git') {
+      throw new Error('Project is not a Git deployment');
+    }
+
+    console.log(`🔄 Starting Git redeploy for ${project.name}...`);
+
+    // Stop PM2 process
+    await pm2Service.stopProcess(project.pm2_name);
+    await new Promise(res => setTimeout(res, 2000)); // Wait for process to stop
+
+    // Create backup snapshot
+    let snapshotVersion = 'pre-git-pull';
+    try {
+      const { version } = await this.createBackupSnapshot(project);
+      snapshotVersion = version;
+      console.log(`✅ Backup created: ${version}`);
+    } catch (e) {
+      console.warn('⚠️  Backup creation failed:', e);
+    }
+
+    try {
+      // Pull latest changes
+      console.log(`📥 Pulling latest changes from ${project.git_branch}...`);
+      const pullResult = await gitService.pullRepository({
+        repoPath: project.path,
+        branch: project.git_branch || 'main',
+        oauthToken,
+        oauthProvider,
+      });
+
+      if (!pullResult.success) {
+        throw new Error(`Git pull failed: ${pullResult.message}`);
+      }
+
+      console.log(`✅ Pull completed: ${pullResult.changes}`);
+
+      // Check if dependencies need reinstalling
+      const needsInstall = await gitService.needsDependencyInstall(project.path);
+      if (needsInstall) {
+        console.log(`📦 Installing dependencies...`);
+        const installCmd = project.install_command || 'npm install';
+        await execAsync(installCmd, { 
+          cwd: project.path,
+          timeout: 10 * 60 * 1000,
+        });
+        console.log(`✅ Dependencies installed`);
+      } else {
+        console.log(`ℹ️  Dependencies up to date, skipping install`);
+      }
+
+      // Run build if configured
+      if (project.build_command) {
+        console.log(`🔨 Building project...`);
+        await execAsync(project.build_command, { 
+          cwd: project.path,
+          timeout: 15 * 60 * 1000,
+        });
+        console.log(`✅ Build completed`);
+      }
+
+      // Regenerate .env
+      try {
+        const decryptedVarsStr = decrypt(project.env_vars || '{}');
+        const decryptedVars = JSON.parse(decryptedVarsStr || '{}');
+        const envLines = Object.entries({ 
+          PORT: project.port?.toString() || '3000', 
+          NODE_ENV: 'production', 
+          ...decryptedVars 
+        }).map(([k, v]) => {
+          const needsQuotes = typeof v === 'string' && /\s|\n|\r|\t/.test(v);
+          const safeVal = (v || '').toString().replace(/"/g, '\\"');
+          return `${k}=${needsQuotes ? '"' + safeVal + '"' : safeVal}`;
+        }).join('\n');
+        await fsPromises.writeFile(path.join(project.path, '.env'), envLines, { mode: 0o600 });
+      } catch (error) {
+        console.warn('Failed to regenerate .env:', error);
+      }
+
+      // Get updated commit info
+      const repoInfo = await gitService.getRepoInfo(project.path);
+      const newCommit = repoInfo.commit || 'unknown';
+
+      // Restart PM2
+      console.log(`🚀 Restarting PM2 process...`);
+      await pm2Service.restartProcess(project.pm2_name);
+
+      // Update database
+      db.prepare(`
+        UPDATE projects 
+        SET last_commit = ?, last_deployed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = ?
+      `).run(newCommit, projectId);
+
+      db.prepare(`
+        INSERT INTO deployments (project_id, version, status, notes)
+        VALUES (?, ?, ?, ?)
+      `).run(projectId, snapshotVersion, 'success', `Git pull deployment: ${pullResult.changes} (${newCommit})`);
+
+      console.log(`✅ Git redeploy completed successfully`);
+
+    } catch (error: any) {
+      console.error(`❌ Git redeploy failed:`, error.message);
+
+      // Rollback on failure
+      console.log(`🔙 Rolling back to previous version...`);
+      try {
+        await this.rollbackToDeployment(projectId, undefined, snapshotVersion);
+        console.log(`✅ Rollback completed`);
+      } catch (rollbackError: any) {
+        console.error(`❌ Rollback failed:`, rollbackError.message);
+      }
+
+      db.prepare(`
+        INSERT INTO deployments (project_id, version, status, notes)
+        VALUES (?, ?, ?, ?)
+      `).run(projectId, snapshotVersion, 'failed', `Git pull failed: ${error.message}`);
+
+      throw error;
+    }
   }
 
   async redeployProject(projectId: number, zipPath: string): Promise<void> {
@@ -641,8 +970,10 @@ export class DeploymentService {
     const parts = command.trim().split(/\s+/);
     
     if (parts[0] === 'npm' || parts[0] === 'yarn' || parts[0] === 'pnpm') {
+      // On Windows, use npm.cmd directly with 'none' interpreter
+      // PM2 will handle it properly when both interpreter and interpreter_args are set to 'none'
       return {
-        script: parts[0],
+        script: `${parts[0]}.cmd`,
         args: parts.slice(1).join(' '),
         interpreter: 'none',
       };

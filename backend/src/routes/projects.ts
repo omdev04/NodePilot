@@ -384,33 +384,73 @@ export default async function projectRoutes(fastify: FastifyInstance) {
     }
 
     try {
-      const outLog = path.join(project.path, 'out.log');
-      const errorLog = path.join(project.path, 'error.log');
+      // Check both project directory and PM2 default location
+      const projectOutLog = path.join(project.path, 'out.log');
+      const projectErrorLog = path.join(project.path, 'error.log');
+      
+      // PM2 default log location on Windows
+      const pm2LogDir = path.join(process.env.USERPROFILE || process.env.HOME || '', '.pm2', 'logs');
+      const pm2OutLog = path.join(pm2LogDir, `${project.pm2_name}-out.log`);
+      const pm2ErrorLog = path.join(pm2LogDir, `${project.pm2_name}-error.log`);
 
-      let outContent = '';
-      let errorContent = '';
+      const allLogs: Array<{ timestamp: Date; content: string; type: 'out' | 'error' }> = [];
 
+      // Read output logs
       try {
-        const outData = await fs.readFile(outLog, 'utf-8');
-        const outLines = outData.split('\n');
-        outContent = outLines.slice(-lines).join('\n');
+        const outData = await fs.readFile(projectOutLog, 'utf-8');
+        const outLines = outData.split('\n').filter(line => line.trim());
+        outLines.forEach(line => {
+          allLogs.push({ timestamp: new Date(), content: line, type: 'out' });
+        });
       } catch (error) {
-        outContent = 'No output logs available';
+        try {
+          const outData = await fs.readFile(pm2OutLog, 'utf-8');
+          const outLines = outData.split('\n').filter(line => line.trim());
+          outLines.forEach(line => {
+            allLogs.push({ timestamp: new Date(), content: line, type: 'out' });
+          });
+        } catch (pm2Error) {
+          // No output logs
+        }
       }
 
+      // Read error logs
       try {
-        const errorData = await fs.readFile(errorLog, 'utf-8');
-        const errorLines = errorData.split('\n');
-        errorContent = errorLines.slice(-lines).join('\n');
+        const errorData = await fs.readFile(projectErrorLog, 'utf-8');
+        const errorLines = errorData.split('\n').filter(line => line.trim());
+        errorLines.forEach(line => {
+          allLogs.push({ timestamp: new Date(), content: line, type: 'error' });
+        });
       } catch (error) {
-        errorContent = 'No error logs available';
+        try {
+          const errorData = await fs.readFile(pm2ErrorLog, 'utf-8');
+          const errorLines = errorData.split('\n').filter(line => line.trim());
+          errorLines.forEach(line => {
+            allLogs.push({ timestamp: new Date(), content: line, type: 'error' });
+          });
+        } catch (pm2Error) {
+          // No error logs
+        }
       }
+
+      // Sort all logs by content (PM2 logs already have timestamps in them)
+      // Take last N lines
+      const recentLogs = allLogs.slice(-lines);
+      
+      // Combine into single log output with type prefix
+      const combinedLogs = recentLogs.map(log => {
+        const prefix = log.type === 'error' ? '[ERROR] ' : '[OUT] ';
+        return prefix + log.content;
+      }).join('\n');
 
       return {
-        out: outContent,
-        error: errorContent,
+        combined: combinedLogs || 'No logs available yet',
+        // Keep backward compatibility
+        out: recentLogs.filter(l => l.type === 'out').map(l => l.content).join('\n') || 'No output logs yet',
+        error: recentLogs.filter(l => l.type === 'error').map(l => l.content).join('\n') || 'No error logs',
       };
     } catch (error) {
+      console.error('Error reading logs:', error);
       return reply.status(500).send({ error: 'Failed to read logs' });
     }
   });
@@ -473,6 +513,104 @@ export default async function projectRoutes(fastify: FastifyInstance) {
     }
     const domains = db.prepare('SELECT * FROM domains WHERE project_id = ?').all(id);
     return { domains };
+  });
+
+  // Verify DNS for domain
+  fastify.post('/:id/domain/:domainId/verify', async (request, reply) => {
+    const { id, domainId } = request.params as { id: string; domainId: string };
+    
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    if (!project) {
+      return reply.status(404).send({ error: 'Project not found' });
+    }
+
+    const domain = db.prepare('SELECT * FROM domains WHERE id = ? AND project_id = ?').get(domainId, id) as any;
+    if (!domain) {
+      return reply.status(404).send({ error: 'Domain not found' });
+    }
+
+    try {
+      const dns = require('dns').promises;
+      const os = require('os');
+      
+      // Get server IP
+      const networkInterfaces = os.networkInterfaces();
+      let serverIP = '127.0.0.1';
+      
+      // Try to find public IP
+      for (const name of Object.keys(networkInterfaces)) {
+        for (const net of networkInterfaces[name] || []) {
+          if (net.family === 'IPv4' && !net.internal) {
+            serverIP = net.address;
+            break;
+          }
+        }
+      }
+
+      // Resolve domain
+      const records = await dns.resolve4(domain.domain);
+      
+      if (!records || records.length === 0) {
+        return reply.status(400).send({ 
+          verified: false, 
+          message: 'No DNS A records found',
+          serverIP,
+          resolvedIPs: []
+        });
+      }
+
+      const verified = records.includes(serverIP);
+      
+      // Update domain verification status
+      if (verified) {
+        db.prepare('UPDATE domains SET verified = 1, verified_at = CURRENT_TIMESTAMP WHERE id = ?').run(domainId);
+      }
+
+      return { 
+        verified, 
+        message: verified ? 'DNS verified successfully' : 'DNS not pointing to this server',
+        serverIP,
+        resolvedIPs: records,
+        expected: serverIP,
+        actual: records[0]
+      };
+    } catch (error: any) {
+      console.error('DNS verification error:', error);
+      return reply.status(500).send({ 
+        verified: false,
+        error: 'DNS verification failed', 
+        message: error.code === 'ENOTFOUND' ? 'Domain not found in DNS' : error.message 
+      });
+    }
+  });
+
+  // Delete domain
+  fastify.delete('/:id/domain/:domainId', async (request, reply) => {
+    const { id, domainId } = request.params as { id: string; domainId: string };
+    
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    if (!project) {
+      return reply.status(404).send({ error: 'Project not found' });
+    }
+
+    const domain = db.prepare('SELECT * FROM domains WHERE id = ? AND project_id = ?').get(domainId, id) as any;
+    if (!domain) {
+      return reply.status(404).send({ error: 'Domain not found' });
+    }
+
+    try {
+      // Remove from database
+      db.prepare('DELETE FROM domains WHERE id = ?').run(domainId);
+      
+      // TODO: Remove nginx config and revoke SSL certificate if needed
+      // const certServiceModule = await import('../services/certService');
+      // await certServiceModule.certService.removeNginxConfig(domain.domain);
+
+      return { success: true, message: 'Domain removed successfully' };
+    } catch (error) {
+      console.error('Failed to delete domain:', error);
+      return reply.status(500).send({ error: 'Failed to delete domain', message: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   // Clear project logs
@@ -571,6 +709,187 @@ export default async function projectRoutes(fastify: FastifyInstance) {
     } catch (error) {
       console.error('Rollback failed:', error);
       return reply.status(500).send({ error: 'Rollback failed', message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  // File Editor APIs
+  
+  // Get file tree
+  fastify.get('/:id/files', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    
+    if (!project) {
+      return reply.status(404).send({ error: 'Project not found' });
+    }
+
+    try {
+      const buildFileTree = async (dirPath: string, relativePath = ''): Promise<any[]> => {
+        const entries = await fs.readdir(dirPath, { withFileTypes: true });
+        const files: any[] = [];
+
+        for (const entry of entries) {
+          // Skip node_modules, .git, and hidden files
+          if (entry.name === 'node_modules' || entry.name === '.git' || entry.name.startsWith('.')) {
+            continue;
+          }
+
+          const fullPath = path.join(dirPath, entry.name);
+          const relPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+
+          if (entry.isDirectory()) {
+            const children = await buildFileTree(fullPath, relPath);
+            files.push({
+              name: entry.name,
+              path: relPath,
+              type: 'directory',
+              children,
+              expanded: false,
+            });
+          } else {
+            files.push({
+              name: entry.name,
+              path: relPath,
+              type: 'file',
+            });
+          }
+        }
+
+        return files.sort((a, b) => {
+          if (a.type === 'directory' && b.type !== 'directory') return -1;
+          if (a.type !== 'directory' && b.type === 'directory') return 1;
+          return a.name.localeCompare(b.name);
+        });
+      };
+
+      const files = await buildFileTree(project.path);
+      return { files };
+    } catch (error) {
+      console.error('Failed to read file tree:', error);
+      return reply.status(500).send({ error: 'Failed to read file tree' });
+    }
+  });
+
+  // Get file content
+  fastify.get('/:id/files/content', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { path: filePath } = request.query as { path: string };
+    
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    if (!project) {
+      return reply.status(404).send({ error: 'Project not found' });
+    }
+
+    try {
+      const fullPath = path.join(project.path, filePath);
+      
+      // Security check: ensure path is within project directory
+      const resolvedPath = path.resolve(fullPath);
+      const projectPath = path.resolve(project.path);
+      if (!resolvedPath.startsWith(projectPath)) {
+        return reply.status(403).send({ error: 'Access denied' });
+      }
+
+      const content = await fs.readFile(fullPath, 'utf-8');
+      return { content, path: filePath };
+    } catch (error) {
+      console.error('Failed to read file:', error);
+      return reply.status(500).send({ error: 'Failed to read file' });
+    }
+  });
+
+  // Save file content
+  fastify.post('/:id/files/save', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { path: string; content: string };
+    
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    if (!project) {
+      return reply.status(404).send({ error: 'Project not found' });
+    }
+
+    try {
+      const fullPath = path.join(project.path, body.path);
+      
+      // Security check
+      const resolvedPath = path.resolve(fullPath);
+      const projectPath = path.resolve(project.path);
+      if (!resolvedPath.startsWith(projectPath)) {
+        return reply.status(403).send({ error: 'Access denied' });
+      }
+
+      await fs.writeFile(fullPath, body.content, 'utf-8');
+      return { success: true, message: 'File saved successfully' };
+    } catch (error) {
+      console.error('Failed to save file:', error);
+      return reply.status(500).send({ error: 'Failed to save file' });
+    }
+  });
+
+  // Create file or folder
+  fastify.post('/:id/files/create', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { path: string; type: 'file' | 'directory' };
+    
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    if (!project) {
+      return reply.status(404).send({ error: 'Project not found' });
+    }
+
+    try {
+      const fullPath = path.join(project.path, body.path);
+      
+      // Security check
+      const resolvedPath = path.resolve(fullPath);
+      const projectPath = path.resolve(project.path);
+      if (!resolvedPath.startsWith(projectPath)) {
+        return reply.status(403).send({ error: 'Access denied' });
+      }
+
+      if (body.type === 'directory') {
+        await fs.mkdir(fullPath, { recursive: true });
+      } else {
+        await fs.writeFile(fullPath, '', 'utf-8');
+      }
+
+      return { success: true, message: `${body.type === 'directory' ? 'Folder' : 'File'} created successfully` };
+    } catch (error) {
+      console.error('Failed to create:', error);
+      return reply.status(500).send({ error: 'Failed to create item' });
+    }
+  });
+
+  // Delete file or folder
+  fastify.delete('/:id/files', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { path: filePath } = request.query as { path: string };
+    
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
+    if (!project) {
+      return reply.status(404).send({ error: 'Project not found' });
+    }
+
+    try {
+      const fullPath = path.join(project.path, filePath);
+      
+      // Security check
+      const resolvedPath = path.resolve(fullPath);
+      const projectPath = path.resolve(project.path);
+      if (!resolvedPath.startsWith(projectPath)) {
+        return reply.status(403).send({ error: 'Access denied' });
+      }
+
+      const stat = await fs.stat(fullPath);
+      if (stat.isDirectory()) {
+        await fs.rm(fullPath, { recursive: true, force: true });
+      } else {
+        await fs.unlink(fullPath);
+      }
+
+      return { success: true, message: 'Deleted successfully' };
+    } catch (error) {
+      console.error('Failed to delete:', error);
+      return reply.status(500).send({ error: 'Failed to delete item' });
     }
   });
 }

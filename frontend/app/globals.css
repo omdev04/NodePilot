@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+.material-symbols-outlined {
+  font-variation-settings:
+  'FILL' 0,
+  'wght' 300,
+  'GRAD' 0,
+  'opsz' 24
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -54,6 +62,6 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
   }
 }
