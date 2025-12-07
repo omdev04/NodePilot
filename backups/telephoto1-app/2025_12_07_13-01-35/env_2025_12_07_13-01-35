@@ -1,8 +1,0 @@
-PORT=5001
-NODE_ENV=development
-BOT_TOKEN=your_telegram_bot_token_from_botfather
-CHANNEL_ID=-100xxxxxxxxxx
-GALLERY_PASSWORD=maku2001
-SESSION_SECRET=gofuckyourdelf
-MONGODB_URI="// Backend String"
-USE_HTTPS=false
