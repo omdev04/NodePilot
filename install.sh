@@ -1,12 +1,23 @@
 #!/bin/bash
 
-# NodePilot Installation Script
+# NodePilot Legacy Installation Script
+# Deprecated: Use setup.sh instead
 # For Ubuntu/Debian systems
+
+echo "⚠️  DEPRECATED: This script is outdated"
+echo "📝 Please use setup.sh for modern installation"
+echo ""
+read -p "Continue with legacy install anyway? (y/n) " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "✅ Use: sudo ./setup.sh"
+    exit 0
+fi
 
 set -e
 
 echo "=========================================="
-echo "  NodePilot Installation Script"
+echo "  NodePilot Legacy Installation Script"
 echo "=========================================="
 echo ""
 

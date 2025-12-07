@@ -1,4 +1,15 @@
-# 🚀 NodePilot - Quick Start Guide (Windows Development)
+# 🚀 NodePilot - Quick Start Guide
+
+## 🔥 New: Automatic SSL with Caddy!
+
+NodePilot now uses **Caddy** for automatic HTTPS. No more manual Certbot or Nginx setup!
+
+**Quick Links:**
+- [Caddy Quick Start](./CADDY_QUICKSTART.md) - 5-minute setup
+- [Full Caddy Guide](./CADDY_DEPLOYMENT.md) - Complete documentation
+- [Migrate from Nginx](./MIGRATION_NGINX_TO_CADDY.md) - For existing users
+
+---
 
 ## ✅ Installation Complete!
 

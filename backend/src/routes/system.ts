@@ -1,6 +1,8 @@
 import { FastifyInstance } from 'fastify';
+import path from 'path';
 import si from 'systeminformation';
 import { pm2Service } from '../services/pm2Service';
+import { cleanupMarkedDirectories } from '../utils/fileSystem';
 import { authenticate } from '../middleware/auth';
 
 export default async function systemRoutes(fastify: FastifyInstance) {
@@ -96,5 +98,26 @@ export default async function systemRoutes(fastify: FastifyInstance) {
         restarts: p.pm2_env?.restart_time || 0,
       })),
     };
+  });
+
+  // Manual cleanup of marked directories
+  fastify.post('/cleanup', async (request, reply) => {
+    try {
+      const projectsDir = process.env.PROJECTS_DIR || path.join(process.cwd(), '../projects');
+      const result = await cleanupMarkedDirectories(projectsDir);
+      
+      return {
+        success: true,
+        cleaned: result.cleaned,
+        failed: result.failed.length,
+        failedPaths: result.failed,
+        message: `Cleaned ${result.cleaned} directories, ${result.failed.length} still locked`,
+      };
+    } catch (error: any) {
+      return reply.status(500).send({
+        error: 'Cleanup failed',
+        message: error.message,
+      });
+    }
   });
 }

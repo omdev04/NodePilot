@@ -331,7 +331,7 @@ export default function EditorPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen w-full bg-white dark:bg-[#0D1117]">
+      <div className="flex min-h-screen w-full bg-white dark:bg-[#030712]">
         <DashboardSidebar open={sidebarOpen} setOpen={setSidebarOpen} />
         <div className="flex-1 flex items-center justify-center">
           <RefreshCw className="h-8 w-8 text-[#00FF88] animate-spin" />
@@ -341,12 +341,12 @@ export default function EditorPage() {
   }
 
   return (
-    <div className="flex min-h-screen w-full bg-white dark:bg-[#0D1117]">
+    <div className="flex min-h-screen w-full bg-white dark:bg-[#030712]">
       <DashboardSidebar open={sidebarOpen} setOpen={setSidebarOpen} />
       
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar */}
-        <div className="h-14 bg-gray-50 dark:bg-[#161B22] border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4">
+        <div className="h-14 bg-gray-50 dark:bg-white/5 border-b border-gray-200 dark:border-white/10 flex items-center justify-between px-4">
           <div className="flex items-center gap-4">
             <button
               onClick={() => router.push('/editor')}
@@ -382,9 +382,9 @@ export default function EditorPage() {
 
         <div className="flex-1 flex overflow-hidden">
           {/* Left Sidebar - File Explorer */}
-          <div className="w-64 bg-gray-50 dark:bg-[#161B22] border-r border-gray-200 dark:border-gray-800 flex flex-col">
+          <div className="w-64 bg-gray-50 dark:bg-white/5 border-r border-gray-200 dark:border-white/10 flex flex-col">
             {/* Explorer Header */}
-            <div className="h-12 flex items-center justify-between px-3 border-b border-gray-200 dark:border-gray-800">
+            <div className="h-12 flex items-center justify-between px-3 border-b border-gray-200 dark:border-white/10">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">Explorer</h3>
               <div className="flex items-center gap-1">
                 <button
@@ -412,7 +412,7 @@ export default function EditorPage() {
             </div>
 
             {/* Search */}
-            <div className="p-3 border-b border-gray-200 dark:border-gray-800">
+            <div className="p-3 border-b border-gray-200 dark:border-white/10">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
                 <input
@@ -420,7 +420,7 @@ export default function EditorPage() {
                   placeholder="Search files..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 bg-white dark:bg-[#0D1117] border border-gray-300 dark:border-gray-800 rounded-lg text-sm text-gray-900 dark:text-gray-300 placeholder-gray-400 dark:placeholder-gray-500 focus:border-[#00FF88] focus:outline-none transition-colors"
+                  className="w-full pl-9 pr-3 py-2 bg-white dark:bg-white/5 border border-gray-300 dark:border-white/10 rounded-lg text-sm text-gray-900 dark:text-[#ffffff] placeholder-gray-400 dark:placeholder-gray-500 focus:border-[#00FF88] focus:outline-none transition-colors"
                 />
               </div>
             </div>
@@ -436,7 +436,7 @@ export default function EditorPage() {
             {selectedFile ? (
               <>
                 {/* Editor Toolbar */}
-                <div className="h-12 bg-[#161B22] border-b border-gray-800 flex items-center justify-between px-4">
+                <div className="h-12 bg-gray-50 dark:bg-white/5 border-b border-gray-200 dark:border-white/10 flex items-center justify-between px-4">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-mono text-gray-400">{selectedFile}</span>
                     {isDirty && <div className="w-2 h-2 rounded-full bg-[#00FF88]" />}

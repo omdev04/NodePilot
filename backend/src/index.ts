@@ -6,12 +6,15 @@ const websocket = require('@fastify/websocket') as any;
 import fastifyStatic from '@fastify/static';
 import path from 'path';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import { initDatabase } from './utils/database';
+import { cleanupMarkedDirectories } from './utils/fileSystem';
 import authRoutes from './routes/auth';
 import projectRoutes from './routes/projects';
 import systemRoutes from './routes/system';
 import gitRoutes from './routes/git';
 import oauthRoutes from './routes/oauth';
+import githubAppRoutes from './routes/githubApp';
 
 dotenv.config();
 
@@ -69,24 +72,65 @@ async function start() {
     await fastify.register(websocket);
 
     // Health check
-    fastify.get('/health', async () => {
+    fastify.get('/api/health', async () => {
       return { status: 'ok', timestamp: new Date().toISOString() };
     });
 
-    // Register routes
+    // Register API routes first
     await fastify.register(authRoutes, { prefix: '/api/auth' });
     await fastify.register(projectRoutes, { prefix: '/api/project' });
     await fastify.register(systemRoutes, { prefix: '/api/system' });
     await fastify.register(gitRoutes, { prefix: '/api/git' });
     await fastify.register(oauthRoutes, { prefix: '/api/oauth' });
+    await fastify.register(githubAppRoutes, { prefix: '/api' });
+
+    // Simple approach: Just show a message, don't try to embed Next.js
+    // Frontend will run separately on port 9000
+    console.log('ℹ️  For single port access, use nginx or run frontend separately');
+    
+    // Root route fallback
+    fastify.get('/', async () => {
+      return {
+        message: 'NodePilot Backend API',
+        version: '1.0.0',
+        api: '/api/health',
+        frontend: 'Run on separate port or use nginx proxy',
+      };
+    });
 
     // Start server
     await fastify.listen({ port: PORT, host: HOST });
     
-    console.log(`\n🚀 NodePilot Backend Server Running!`);
-    console.log(`📍 URL: http://${HOST}:${PORT}`);
+    console.log(`\n🚀 NodePilot Backend Running!`);
+    console.log(`📍 Backend API: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
     console.log(`🔐 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`💾 Projects Dir: ${process.env.PROJECTS_DIR || './projects'}\n`);
+    console.log(`💾 Projects Dir: ${process.env.PROJECTS_DIR || './projects'}`);
+    console.log(`\n💡 To access frontend:`);
+    console.log(`   Option 1: Run frontend separately - cd ../frontend && npm run dev`);
+    console.log(`   Option 2: Use nginx to proxy both services\n`);
+
+    // Start background cleanup job for locked directories
+    const projectsDir = process.env.PROJECTS_DIR || path.join(process.cwd(), '../projects');
+    const cleanupInterval = setInterval(async () => {
+      try {
+        const result = await cleanupMarkedDirectories(projectsDir);
+        if (result.cleaned > 0 || result.failed.length > 0) {
+          console.log(`🧹 Cleanup: ${result.cleaned} directories removed, ${result.failed.length} still locked`);
+        }
+      } catch (error) {
+        console.error('Cleanup job error:', error);
+      }
+    }, 5 * 60 * 1000); // Run every 5 minutes
+
+    // Cleanup on shutdown
+    const shutdown = async () => {
+      clearInterval(cleanupInterval);
+      await fastify.close();
+      process.exit(0);
+    };
+
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
 
   } catch (err) {
     fastify.log.error(err);

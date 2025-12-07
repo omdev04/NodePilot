@@ -20,6 +20,7 @@ Perfect for freelancers, indie devs, and VPS users who want a super-simple, supe
 # ⚡ Features
 
 * 🚀 **One-Click Deployment** — Upload ZIP → Auto extract → Auto install → Run
+* 🔔 **GitHub Webhooks** — Auto-deploy on git push with automatic PM2 refresh
 * 🔥 **Pure PM2 Runtime** — No Docker, no containers, zero overhead
 * 📦 **Auto Dependencies** — Automatically runs `npm install`
 * 🧠 **Port Auto-Detection** — Detects real running port automatically
@@ -27,6 +28,7 @@ Perfect for freelancers, indie devs, and VPS users who want a super-simple, supe
 * 📝 **Real-time Logs** — WebSocket powered log streaming
 * 🔐 **JWT Authentication** — Secure admin access
 * 🎛️ **Modern UI** — Clean, Dokploy-style interface
+* 🔒 **Automatic SSL** — Caddy reverse proxy with auto HTTPS via Let's Encrypt
 * ⚡ **Lightweight** — Uses less than **100MB RAM**
 
 ---
@@ -57,52 +59,96 @@ NodePilot/
 
 # 🛠️ Installation
 
-## 1. Clone Repository
+## 🐧 Linux (Ubuntu/Debian) - Recommended
+
+### Quick Install (5 minutes)
 
 ```bash
-cd /opt
-git clone <your-repo-url> nodepilot
-cd nodepilot
+git clone https://github.com/yourusername/NodePilot.git
+cd NodePilot
+chmod +x setup.sh
+sudo ./setup.sh
+./start.sh
 ```
 
-## 2. Install Dependencies
+**Full documentation**: [LINUX_DEPLOYMENT.md](./LINUX_DEPLOYMENT.md)
+
+**Caddy setup (automatic SSL)**: [CADDY_DEPLOYMENT.md](./CADDY_DEPLOYMENT.md)
+
+### Quick Commands
+```bash
+./start.sh          # Start NodePilot
+./start-caddy.sh    # Start with Caddy (automatic SSL)
+./stop.sh           # Stop NodePilot  
+./restart.sh        # Restart NodePilot
+./status.sh         # Check status
+```
+
+## 🪟 Windows Development
+
+See [WINDOWS_DEV.md](./WINDOWS_DEV.md) for Windows setup.
+
+## 📦 Manual Installation (Any OS)
+
+### 1. Clone Repository
+
+```bash
+git clone https://github.com/yourusername/NodePilot.git
+cd NodePilot
+```
+
+### 2. Install Dependencies
 
 ```bash
 npm install
-
-cd backend && npm install
-cd ../frontend && npm install
 ```
 
-## 3. Configure Environment
+### 3. Configure Environment
 
 ```bash
-cd backend
-cp .env.example .env
-nano .env
+# Backend
+cp backend/.env.example backend/.env
+nano backend/.env
+
+# Frontend
+cp frontend/.env.example frontend/.env.local
+nano frontend/.env.local
 ```
 
-Example:
-
-```env
-JWT_SECRET=super-secret-key-change-me
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=change-this
-PROJECTS_DIR=/opt/nodepilot/projects
-```
-
-## 4. Build Project
+### 4. Build Project
 
 ```bash
 npm run build
 ```
 
-## 5. Initialize Database
+### 5. Start Application
+
+#### 🎯 Single Port Mode (Recommended)
+Access everything on **one port** (9001):
 
 ```bash
-cd backend
-npm run db:init
+# Linux/Mac
+./start-single-port.sh
+
+# Windows
+start-single-port.bat
 ```
+
+**Access:** http://localhost:9001 (Frontend + Backend both on same port!)
+
+#### 🔀 Dual Port Mode (Traditional)
+Separate ports for frontend and backend:
+
+```bash
+# Development
+npm run dev
+
+# Production with PM2
+pm2 start ecosystem.config.js
+pm2 save
+```
+
+**See:** [SINGLE_PORT_GUIDE.md](./SINGLE_PORT_GUIDE.md) for details.
 
 ---
 

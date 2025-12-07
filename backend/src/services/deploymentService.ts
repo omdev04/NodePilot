@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import unzipper from 'unzipper';
 import { pm2Service } from './pm2Service';
 import { gitService } from './gitService';
+import { removeDirectory, markForDeletion, DirectoryRemovalError } from '../utils/fileSystem';
 import tar from 'tar';
 // Optional runtime dependency: archiver may not be installed in some environments
 let archiver: any = null;
@@ -541,15 +542,17 @@ export class DeploymentService {
         console.log(`✅ Build completed`);
       }
 
-      // Regenerate .env
+      // Regenerate .env and build complete environment
+      let fullEnv = { PORT: project.port?.toString() || '3000', NODE_ENV: 'production' };
       try {
         const decryptedVarsStr = decrypt(project.env_vars || '{}');
         const decryptedVars = JSON.parse(decryptedVarsStr || '{}');
-        const envLines = Object.entries({ 
+        fullEnv = { 
           PORT: project.port?.toString() || '3000', 
           NODE_ENV: 'production', 
           ...decryptedVars 
-        }).map(([k, v]) => {
+        };
+        const envLines = Object.entries(fullEnv).map(([k, v]) => {
           const needsQuotes = typeof v === 'string' && /\s|\n|\r|\t/.test(v);
           const safeVal = (v || '').toString().replace(/"/g, '\\"');
           return `${k}=${needsQuotes ? '"' + safeVal + '"' : safeVal}`;
@@ -563,9 +566,21 @@ export class DeploymentService {
       const repoInfo = await gitService.getRepoInfo(project.path);
       const newCommit = repoInfo.commit || 'unknown';
 
-      // Restart PM2
-      console.log(`🚀 Restarting PM2 process...`);
-      await pm2Service.restartProcess(project.pm2_name);
+      // Restart PM2 with fresh environment (delete and start to reload env vars)
+      console.log(`🚀 Restarting PM2 process with updated environment...`);
+      await pm2Service.deleteProcess(project.pm2_name);
+      
+      const { script, args, interpreter } = this.parseStartCommand(project.start_command);
+      await pm2Service.startProcess({
+        name: project.pm2_name,
+        script,
+        args,
+        interpreter,
+        cwd: project.path,
+        env: fullEnv,
+        error_file: path.join(project.path, 'error.log'),
+        out_file: path.join(project.path, 'out.log'),
+      });
 
       // Update database
       db.prepare(`
@@ -578,6 +593,8 @@ export class DeploymentService {
         INSERT INTO deployments (project_id, version, status, notes)
         VALUES (?, ?, ?, ?)
       `).run(projectId, snapshotVersion, 'success', `Git pull deployment: ${pullResult.changes} (${newCommit})`);
+      
+      saveDb(); // Ensure changes are persisted
 
       console.log(`✅ Git redeploy completed successfully`);
 
@@ -597,6 +614,8 @@ export class DeploymentService {
         INSERT INTO deployments (project_id, version, status, notes)
         VALUES (?, ?, ?, ?)
       `).run(projectId, snapshotVersion, 'failed', `Git pull failed: ${error.message}`);
+      
+      saveDb(); // Ensure changes are persisted
 
       throw error;
     }
@@ -675,12 +694,18 @@ export class DeploymentService {
         console.log('No package.json or install failed');
       }
 
-      // Restart PM2 process
+      // Restart PM2 process with fresh environment
       // Re-generate .env from stored variables, if any
+      let fullEnv = { PORT: project.port?.toString() || '3000', NODE_ENV: 'production' };
       try {
         const decryptedVarsStr = decrypt(project.env_vars || '{}');
         const decryptedVars = JSON.parse(decryptedVarsStr || '{}');
-        const envLines = Object.entries({ PORT: project.port?.toString() || '3000', NODE_ENV: 'production', ...decryptedVars }).map(([k, v]) => {
+        fullEnv = { 
+          PORT: project.port?.toString() || '3000', 
+          NODE_ENV: 'production', 
+          ...decryptedVars 
+        };
+        const envLines = Object.entries(fullEnv).map(([k, v]) => {
           const needsQuotes = typeof v === 'string' && /\s|\n|\r|\t/.test(v);
           const safeVal = (v || '').toString().replace(/"/g, '\\"');
           return `${k}=${needsQuotes ? '"' + safeVal + '"' : safeVal}`;
@@ -690,7 +715,20 @@ export class DeploymentService {
         console.warn('Failed to regenerate .env during redeploy:', error);
       }
 
-      await pm2Service.restartProcess(project.pm2_name);
+      // Delete and restart to reload env vars
+      await pm2Service.deleteProcess(project.pm2_name);
+      
+      const { script, args, interpreter } = this.parseStartCommand(project.start_command);
+      await pm2Service.startProcess({
+        name: project.pm2_name,
+        script,
+        args,
+        interpreter,
+        cwd: project.path,
+        env: fullEnv,
+        error_file: path.join(project.path, 'error.log'),
+        out_file: path.join(project.path, 'out.log'),
+      });
 
       // Update database
       db.prepare('UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(projectId);
@@ -700,6 +738,8 @@ export class DeploymentService {
         VALUES (?, ?, ?, ?)
       `).run(projectId, snapshotVersion, 'success', `Redeployment successful (version: ${snapshotVersion})`);
       try { console.log(`Redeployment record created for projectId ${projectId} version ${snapshotVersion}`); } catch (e) {}
+      
+      saveDb(); // Ensure changes are persisted
 
       // Remove backup after successful deployment
       setTimeout(async () => {
@@ -902,9 +942,11 @@ export class DeploymentService {
       INSERT INTO deployments (project_id, version, status, notes)
       VALUES (?, ?, ?, ?)
     `).run(projectId, targetVersion, 'rollback', `Rolled back to ${targetVersion}`);
+    
+    saveDb(); // Ensure changes are persisted
   }
 
-  async deleteProject(projectId: number): Promise<void> {
+  async deleteProject(projectId: number): Promise<{ success: boolean; markedForDeletion?: string }> {
     const project = db
       .prepare('SELECT * FROM projects WHERE id = ?')
       .get(projectId) as Project;
@@ -913,18 +955,46 @@ export class DeploymentService {
       throw new Error('Project not found');
     }
 
-    // Stop and delete PM2 process
+    // Step 1: Stop and delete PM2 process
     try {
       await pm2Service.deleteProcess(project.pm2_name);
-    } catch (error) {
-      console.error('PM2 delete error:', error);
+      // Small delay to let PM2 cleanup
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (error: any) {
+      // Process not found is acceptable
+      if (!error.message?.includes('not found')) {
+        console.warn('PM2 deletion warning:', error.message);
+      }
     }
 
-    // Remove project directory
-    await fsPromises.rm(project.path, { recursive: true, force: true });
+    // Step 2: Attempt to remove directory
+    let markedPath: string | undefined;
+    
+    try {
+      await removeDirectory(project.path);
+    } catch (error) {
+      if (error instanceof DirectoryRemovalError && error.recoverable) {
+        // Directory is locked - mark it for deferred deletion instead
+        try {
+          markedPath = await markForDeletion(project.path);
+          console.log(`Directory locked, marked for cleanup: ${markedPath}`);
+        } catch (markError) {
+          console.error('Failed to mark directory for deletion:', markError);
+          // Continue - we'll delete from DB but leave directory orphaned
+        }
+      } else {
+        // Non-recoverable error - log but continue to database deletion
+        console.error('Directory removal failed:', error);
+      }
+    }
 
-    // Delete from database
+    // Step 3: Remove from database
     db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+
+    return {
+      success: true,
+      markedForDeletion: markedPath
+    };
   }
 
   private async extractZip(zipPath: string, destination: string): Promise<void> {
@@ -940,20 +1010,32 @@ export class DeploymentService {
             if (items.length === 1) {
               const singleItem = items[0];
               const itemPath = path.join(destination, singleItem);
-              const stats = await fsPromises.stat(itemPath);
               
-              if (stats.isDirectory()) {
-                // Move all contents from nested folder to parent
-                const nestedItems = await fsPromises.readdir(itemPath);
+              try {
+                const stats = await fsPromises.stat(itemPath);
                 
-                for (const nestedItem of nestedItems) {
-                  const srcPath = path.join(itemPath, nestedItem);
-                  const destPath = path.join(destination, nestedItem);
-                  await fsPromises.rename(srcPath, destPath);
+                if (stats.isDirectory()) {
+                  // Use a temporary directory to avoid naming conflicts
+                  const tempPath = path.join(destination, '.temp-flatten-' + Date.now());
+                  
+                  // Rename nested folder to temp name first
+                  await fsPromises.rename(itemPath, tempPath);
+                  
+                  // Move all contents from temp folder to destination
+                  const nestedItems = await fsPromises.readdir(tempPath);
+                  
+                  for (const nestedItem of nestedItems) {
+                    const srcPath = path.join(tempPath, nestedItem);
+                    const destPath = path.join(destination, nestedItem);
+                    await fsPromises.rename(srcPath, destPath);
+                  }
+                  
+                  // Remove the now-empty temp folder
+                  await fsPromises.rmdir(tempPath);
                 }
-                
-                // Remove the now-empty nested folder
-                await fsPromises.rmdir(itemPath);
+              } catch (statError) {
+                // If stat fails, skip flattening
+                console.warn('Could not flatten directory structure:', statError);
               }
             }
             

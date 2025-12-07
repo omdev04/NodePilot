@@ -6,8 +6,11 @@ import { Providers } from "./providers";
 const spaceGrotesk = Space_Grotesk({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "NodePilot - Mini Dokploy",
+  title: "NodePilot",
   description: "PM2 Based Auto Deployment System",
+  icons: {
+    icon: "/Logo/trans.png",
+  },
 };
 
 export default function RootLayout({

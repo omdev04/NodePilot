@@ -97,6 +97,37 @@ export const dbWrapper = {
     if (!sql.includes('journal_mode')) {
       db.run(`PRAGMA ${sql}`);
     }
+  },
+  // Helper methods for common queries
+  getProject: (id: number) => {
+    const stmt = db.prepare('SELECT * FROM projects WHERE id = ?');
+    stmt.bind([id]);
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+  getUser: (id: number) => {
+    const stmt = db.prepare('SELECT * FROM users WHERE id = ?');
+    stmt.bind([id]);
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+  getUserByUsername: (username: string) => {
+    const stmt = db.prepare('SELECT * FROM users WHERE username = ?');
+    stmt.bind([username]);
+    const result = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+    return result;
+  },
+  getAllProjects: () => {
+    const stmt = db.prepare('SELECT * FROM projects');
+    const results: any[] = [];
+    while (stmt.step()) {
+      results.push(stmt.getAsObject());
+    }
+    stmt.free();
+    return results;
   }
 };
 
@@ -108,13 +139,14 @@ export async function initDatabase() {
   // Enable WAL mode for better performance (skipped in sql.js)
   dbWrapper.pragma('journal_mode = WAL');
 
-  // Create users table
+  // Create users table with role
   dbWrapper.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
       email TEXT,
+      role TEXT DEFAULT 'user',
       avatar_url TEXT,
       oauth_provider TEXT,
       oauth_token TEXT,
@@ -124,7 +156,7 @@ export async function initDatabase() {
     )
   `);
 
-  // Create projects table
+  // Create projects table with owner
   dbWrapper.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,6 +168,7 @@ export async function initDatabase() {
       env_vars TEXT,
       pm2_name TEXT NOT NULL,
       status TEXT DEFAULT 'stopped',
+      owner_id INTEGER NOT NULL,
       deploy_method TEXT DEFAULT 'zip',
       git_url TEXT,
       git_branch TEXT,
@@ -145,7 +178,8 @@ export async function initDatabase() {
       last_commit TEXT,
       last_deployed_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 
@@ -173,6 +207,39 @@ export async function initDatabase() {
       expires_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Create project_members table for RBAC
+  dbWrapper.exec(`
+    CREATE TABLE IF NOT EXISTS project_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('owner', 'admin', 'developer', 'viewer')),
+      invited_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL,
+      UNIQUE(project_id, user_id)
+    )
+  `);
+
+  // Create invitations table
+  dbWrapper.exec(`
+    CREATE TABLE IF NOT EXISTS invitations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('admin', 'developer', 'viewer')),
+      token TEXT UNIQUE NOT NULL,
+      invited_by INTEGER NOT NULL,
+      expires_at DATETIME NOT NULL,
+      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'expired', 'cancelled')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 

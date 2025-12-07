@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { DashboardSidebar } from '@/components/ui/dashboard-sidebar';
+import { Loader, LoaderOverlay, InlineLoader } from '@/components/ui/loader';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { GitInfo } from '@/components/ui/git-info';
@@ -31,6 +32,21 @@ export default function ProjectDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [deployLoading, setDeployLoading] = useState(false);
 
+  // Environment Variables State
+  type EnvRow = { id: string; key: string; value: string };
+  const [envList, setEnvList] = useState<EnvRow[]>([]);
+  const [revealMap, setRevealMap] = useState<Record<string, boolean>>({});
+  const [envDirty, setEnvDirty] = useState(false);
+  const envDirtyRef = useRef(false);
+  const [envLoading, setEnvLoading] = useState(false);
+  const [envError, setEnvError] = useState('');
+  const [lastAddedId, setLastAddedId] = useState<string | null>(null);
+
+  // Sync envDirty with ref
+  useEffect(() => {
+    envDirtyRef.current = envDirty;
+  }, [envDirty]);
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -39,7 +55,7 @@ export default function ProjectDetailPage() {
     }
 
     // Initial fast load
-    fetchProject();
+    fetchProject(true); // Force env update on initial load
     
     // Load logs only when needed
     if (activeTab === 'logs') {
@@ -52,6 +68,11 @@ export default function ProjectDetailPage() {
     }
     if (activeTab === 'deployments') {
       fetchDeployments();
+    }
+    
+    // When switching to environment tab, force refresh
+    if (activeTab === 'environment') {
+      fetchProject(true);
     }
     
     // Optimized polling - only update current view
@@ -99,10 +120,14 @@ export default function ProjectDetailPage() {
       const response = await api.get(`/project/${projectId}`);
       setProject(response.data);
       
-      // Process env vars if on environment tab AND (no unsaved changes OR force update)
-      if (activeTab === 'environment' && (!envDirtyRef.current || forceEnvUpdate)) {
+      // Always update env vars if force update OR (on environment tab AND no unsaved changes)
+      if (forceEnvUpdate || (activeTab === 'environment' && !envDirtyRef.current)) {
         const ev = response.data.env_vars || {};
-        const serverRows: EnvRow[] = Object.entries(ev).map(([k, v]) => ({ id: k, key: k, value: String(v ?? '') }));
+        const serverRows: EnvRow[] = Object.entries(ev).map(([k, v]) => ({ 
+          id: `${k}-${Date.now()}`, 
+          key: k, 
+          value: String(v ?? '') 
+        }));
         setEnvList(serverRows);
         const initReveal: Record<string, boolean> = {};
         const initSensitive: Record<string, boolean> = {};
@@ -113,6 +138,7 @@ export default function ProjectDetailPage() {
         });
         setRevealMap(initReveal);
         setSensitiveMap(initSensitive);
+        setEnvDirty(false);
       }
       setLoading(false);
     } catch (error) {
@@ -223,49 +249,27 @@ export default function ProjectDetailPage() {
   };
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  type EnvRow = { id: string; key: string; value: string };
-  const [envList, setEnvList] = useState<EnvRow[]>([]);
-  const [lastAddedId, setLastAddedId] = useState<string | null>(null);
-  // Ensure that a newly added row is focused for immediate typing
+  
+  // Auto-focus for newly added env rows
   useEffect(() => {
     if (!lastAddedId) return;
     const timer = setTimeout(() => {
-      const el = document.querySelector(`input[data-env-id=\"${lastAddedId}\"]`) as HTMLInputElement | null;
+      const el = document.querySelector(`input[data-env-id="${lastAddedId}"]`) as HTMLInputElement | null;
       if (el) {
         try { el.focus(); el.select(); } catch {}
       }
     }, 50);
     return () => clearTimeout(timer);
   }, [lastAddedId]);
-  const [revealMap, setRevealMap] = useState<Record<string, boolean>>({});
-  const [envLoading, setEnvLoading] = useState(false);
-  const [envError, setEnvError] = useState('');
-  const [envDirty, setEnvDirty] = useState(false);
-  const envDirtyRef = useRef(envDirty);
-  useEffect(() => { envDirtyRef.current = envDirty; }, [envDirty]);
 
   if (loading || !project) {
     return (
       <div className="flex min-h-screen w-full bg-gray-50 dark:bg-gray-950">
         <DashboardSidebar open={sidebarOpen} setOpen={setSidebarOpen} />
         <div className="flex-1 overflow-auto">
-          <div className="sticky top-0 z-10 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 px-6 py-4">
-            <div className="animate-pulse flex justify-between">
-              <div className="space-y-2">
-                <div className="h-8 w-48 bg-gray-200 dark:bg-gray-800 rounded"></div>
-                <div className="h-4 w-64 bg-gray-200 dark:bg-gray-800 rounded"></div>
-              </div>
-            </div>
+          <div className="flex items-center justify-center min-h-[400px]">
+            <Loader message="Loading Project" size="lg" />
           </div>
-          <main className="p-6">
-            <div className="animate-pulse space-y-6">
-              <div className="h-64 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"></div>
-              <div className="grid grid-cols-2 gap-6">
-                <div className="h-48 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"></div>
-                <div className="h-48 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"></div>
-              </div>
-            </div>
-          </main>
         </div>
       </div>
     );
@@ -277,42 +281,50 @@ export default function ProjectDetailPage() {
       
       <div className="flex-1 overflow-auto">
         {/* Header */}
-        <div className="sticky top-0 z-10 bg-white dark:bg-gray-950 border-b border-gray-200 dark:border-gray-800 px-6 py-4">
+        <div className="sticky top-0 z-10 bg-white dark:bg-[#030712] border-b border-gray-200 dark:border-white/10 px-6 py-5">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{project.display_name}</h1>
-              <p className="text-gray-600 dark:text-gray-400 mt-1">{project.name}</p>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-medium ${
-                project.pm2Info?.status === 'online'
-                  ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'
-                  : 'bg-gray-200 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-              }`}>
-                {project.pm2Info?.status || 'stopped'}
+              <div className="flex items-center gap-4">
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-[#ffffff]">{project.display_name}</h1>
+                <span className={`text-xs font-medium px-3 py-1 rounded-full border ${
+                  project.pm2Info?.status === 'online'
+                    ? 'text-[#30e38d] bg-[#30e38d]/10 border-[#30e38d]/20'
+                    : 'text-gray-500 bg-gray-500/10 border-gray-500/20'
+                }`}>
+                  {project.pm2Info?.status === 'online' ? 'Running' : 'Stopped'}
+                </span>
               </div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Port: <span className="text-gray-900 dark:text-gray-300">{project.actualPort || project.port || 'N/A'}</span>
+                {project.pm2Info?.status === 'online' && (
+                  <>
+                    <span className="mx-2 text-gray-400 dark:text-gray-600">|</span>
+                    Uptime: <span className="text-gray-900 dark:text-gray-300">{formatUptime(Date.now() - project.pm2Info.uptime)}</span>
+                  </>
+                )}
+              </p>
             </div>
           </div>
         </div>
 
-        <main className="p-4 sm:p-6 max-w-7xl mx-auto w-full">
+        <main className="p-8 max-w-7xl mx-auto w-full space-y-8">
         {/* Action Buttons */}
-        <div className="flex flex-wrap gap-2 sm:gap-3 mb-6 sm:mb-8">
+        <div className="flex flex-wrap gap-2">
           {project.pm2Info?.status === 'online' ? (
             <>
               <button 
                 onClick={() => handleAction('stop')} 
                 disabled={actionLoading !== null || deployLoading}
-                className="inline-flex items-center px-3 sm:px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-gray-900 dark:text-[#ffffff] text-sm hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {actionLoading === 'stop' ? (
                   <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Stopping...
+                    <InlineLoader />
+                    <span>Stopping...</span>
                   </>
                 ) : (
                   <>
-                    <Square className="h-4 w-4 mr-2" />
+                    <Square className="h-4 w-4" />
                     Stop
                   </>
                 )}
@@ -320,16 +332,16 @@ export default function ProjectDetailPage() {
               <button 
                 onClick={() => handleAction('restart')} 
                 disabled={actionLoading !== null || deployLoading}
-                className="inline-flex items-center px-3 sm:px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-gray-900 dark:text-[#ffffff] text-sm hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {actionLoading === 'restart' ? (
                   <>
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                    Restarting...
+                    <InlineLoader />
+                    <span>Restarting...</span>
                   </>
                 ) : (
                   <>
-                    <RotateCw className="h-4 w-4 mr-2" />
+                    <RotateCw className="h-4 w-4" />
                     Restart
                   </>
                 )}
@@ -339,16 +351,16 @@ export default function ProjectDetailPage() {
             <button 
               onClick={() => handleAction('start')} 
               disabled={actionLoading !== null || deployLoading}
-              className="inline-flex items-center px-3 sm:px-4 py-2 rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[#30e38d] text-black text-sm hover:bg-[#30e38d]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             >
               {actionLoading === 'start' ? (
                 <>
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                  Starting...
+                  <InlineLoader className="text-black" />
+                  <span>Starting...</span>
                 </>
               ) : (
                 <>
-                  <Play className="h-4 w-4 mr-2" />
+                  <Play className="h-4 w-4" />
                   Start
                 </>
               )}
@@ -357,9 +369,9 @@ export default function ProjectDetailPage() {
           <button
             onClick={() => router.push(`/projects/${projectId}/editor`)}
             disabled={actionLoading !== null || deployLoading}
-            className="inline-flex items-center px-3 sm:px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-gray-900 dark:text-[#ffffff] text-sm hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <FileText className="h-4 w-4 mr-2" />
+            <FileText className="h-4 w-4" />
             Editor
           </button>
           <button
@@ -374,16 +386,16 @@ export default function ProjectDetailPage() {
               input.click();
             }}
             disabled={actionLoading !== null || deployLoading}
-            className="inline-flex items-center px-3 sm:px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-gray-900 dark:text-[#ffffff] text-sm hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {deployLoading ? (
               <>
-                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                Deploying...
+                <InlineLoader />
+                <span>Deploying...</span>
               </>
             ) : (
               <>
-                <Upload className="h-4 w-4 mr-2" />
+                <Upload className="h-4 w-4" />
                 Redeploy
               </>
             )}
@@ -391,9 +403,9 @@ export default function ProjectDetailPage() {
           <button 
             onClick={handleDelete} 
             disabled={actionLoading !== null || deployLoading}
-            className="inline-flex items-center px-3 sm:px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 text-sm hover:bg-red-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Trash2 className="h-4 w-4 mr-2" />
+            <Trash2 className="h-4 w-4" />
             Delete
           </button>
         </div>
@@ -421,72 +433,73 @@ export default function ProjectDetailPage() {
         )}
 
         {/* Tabs */}
-        <div className="border-b border-gray-200 dark:border-gray-800 mb-6">
-          <nav className="-mb-px flex space-x-8">
+        <div className="border-b border-gray-200 dark:border-white/10">
+          <nav className="flex items-center gap-6 text-sm">
             <button
               onClick={() => setActiveTab('overview')}
-              className={`${
+              className={`flex items-center gap-2 py-3 border-b-2 transition-colors ${
                 activeTab === 'overview'
-                  ? 'border-gray-900 dark:border-white text-gray-900 dark:text-gray-100'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
-              } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm`}
+                  ? 'text-gray-900 dark:text-[#ffffff] border-[#30e38d]'
+                  : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-900 dark:hover:text-[#ffffff] hover:border-white/20'
+              }`}
             >
+              <Globe className="h-4 w-4" />
               Overview
             </button>
             <button
               onClick={() => setActiveTab('logs')}
-              className={`${
+              className={`flex items-center gap-2 py-3 border-b-2 transition-colors ${
                 activeTab === 'logs'
-                  ? 'border-gray-900 dark:border-white text-gray-900 dark:text-gray-100'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
-              } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
+                  ? 'text-gray-900 dark:text-[#ffffff] border-[#30e38d]'
+                  : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-900 dark:hover:text-[#ffffff] hover:border-white/20'
+              }`}
             >
-              <FileText className="h-4 w-4 mr-2" />
+              <FileText className="h-4 w-4" />
               Logs
             </button>
             <button
               onClick={() => setActiveTab('environment')}
-              className={`${
+              className={`flex items-center gap-2 py-3 border-b-2 transition-colors ${
                 activeTab === 'environment'
-                  ? 'border-gray-900 dark:border-white text-gray-900 dark:text-gray-100'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
-              } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
+                  ? 'text-gray-900 dark:text-[#ffffff] border-[#30e38d]'
+                  : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-900 dark:hover:text-[#ffffff] hover:border-white/20'
+              }`}
             >
-              <Hash className="h-4 w-4 mr-2" />
+              <Hash className="h-4 w-4" />
               Environment
             </button>
             <button
               onClick={() => setActiveTab('domains')}
-              className={`${
+              className={`flex items-center gap-2 py-3 border-b-2 transition-colors ${
                 activeTab === 'domains'
-                  ? 'border-gray-900 dark:border-white text-gray-900 dark:text-gray-100'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
-              } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
+                  ? 'text-gray-900 dark:text-[#ffffff] border-[#30e38d]'
+                  : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-900 dark:hover:text-[#ffffff] hover:border-white/20'
+              }`}
             >
-              <Globe className="h-4 w-4 mr-2" />
+              <Globe className="h-4 w-4" />
               Domains
             </button>
             <button
               onClick={() => setActiveTab('deployments')}
-              className={`${
+              className={`flex items-center gap-2 py-3 border-b-2 transition-colors ${
                 activeTab === 'deployments'
-                  ? 'border-gray-900 dark:border-white text-gray-900 dark:text-gray-100'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
-              } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
+                  ? 'text-gray-900 dark:text-[#ffffff] border-[#30e38d]'
+                  : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-900 dark:hover:text-[#ffffff] hover:border-white/20'
+              }`}
             >
-              <RotateCw className="h-4 w-4 mr-2" />
+              <RotateCw className="h-4 w-4" />
               Deployments
             </button>
             {project?.deploy_method === 'git' && (
               <button
                 onClick={() => setActiveTab('git')}
-                className={`${
+                className={`flex items-center gap-2 py-3 border-b-2 transition-colors ${
                   activeTab === 'git'
-                    ? 'border-gray-900 dark:border-white text-gray-900 dark:text-gray-100'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
-                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
+                    ? 'text-gray-900 dark:text-[#ffffff] border-[#30e38d]'
+                    : 'text-gray-500 dark:text-gray-400 border-transparent hover:text-gray-900 dark:hover:text-[#ffffff] hover:border-white/20'
+                }`}
               >
-                <GitBranch className="h-4 w-4 mr-2" />
+                <GitBranch className="h-4 w-4" />
                 Git
               </button>
             )}
@@ -496,231 +509,206 @@ export default function ProjectDetailPage() {
         {activeTab === 'overview' && (
           <div className="space-y-6">
             {/* Status Banner */}
-            <div className={`rounded-xl border-2 p-6 ${
-              project.pm2Info?.status === 'online'
-                ? 'border-green-200 dark:border-green-800 bg-gradient-to-br from-green-50 to-white dark:from-green-950/20 dark:to-gray-950'
-                : 'border-yellow-200 dark:border-yellow-800 bg-gradient-to-br from-yellow-50 to-white dark:from-yellow-950/20 dark:to-gray-950'
-            }`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${
-                    project.pm2Info?.status === 'online'
-                      ? 'bg-green-100 dark:bg-green-900/30'
-                      : 'bg-yellow-100 dark:bg-yellow-900/30'
-                  }`}>
-                    {project.pm2Info?.status === 'online' ? (
-                      <svg className="w-8 h-8 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : (
-                      <svg className="w-8 h-8 text-yellow-600 dark:text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                    )}
-                  </div>
-                  <div>
-                    <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-                      {project.pm2Info?.status === 'online' ? 'Running' : 'Stopped'}
-                    </h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {project.pm2Info?.status === 'online' 
-                        ? `Application is running smoothly on port ${project.port || 'default'}`
-                        : 'Application is currently stopped'}
-                    </p>
-                  </div>
+            <div className="flex items-center justify-between p-4 rounded-lg bg-gradient-to-r from-[#30e38d]/10 to-[#30e38d]/5 border border-[#30e38d]/20">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 flex items-center justify-center rounded-full bg-[#30e38d]/10">
+                  <svg className="w-6 h-6 text-[#30e38d]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
                 </div>
-                {project.pm2Info?.status === 'online' && (
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Live</span>
-                  </div>
-                )}
+                <div>
+                  <h3 className="font-semibold text-gray-900 dark:text-[#ffffff]">
+                    {project.pm2Info?.status === 'online' ? 'Running' : 'Stopped'}
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {project.pm2Info?.status === 'online' 
+                      ? `Application is running smoothly on port ${project.actualPort || project.port || 'default'}`
+                      : 'Application is currently stopped'}
+                  </p>
+                </div>
               </div>
+              {project.pm2Info?.status === 'online' && (
+                <div className="flex items-center gap-2 text-sm text-[#30e38d]">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#30e38d] opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-[#30e38d]"></span>
+                  </span>
+                  <span>Live</span>
+                </div>
+              )}
             </div>
 
             {/* Metrics Grid */}
             {project.pm2Info && (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 hover:shadow-lg transition-shadow">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                      <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                      </svg>
-                    </div>
+              <div className="grid grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-[#0a0f1d] p-5 rounded-lg border border-gray-200 dark:border-white/10 flex items-start gap-4">
+                  <svg className="w-8 h-8 text-[#30e38d] mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">CPU Usage</p>
+                    <p className="text-3xl font-bold text-gray-900 dark:text-[#ffffff]">{project.pm2Info.cpu}%</p>
                   </div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">CPU Usage</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{project.pm2Info.cpu}%</p>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 hover:shadow-lg transition-shadow">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
-                      <svg className="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-                      </svg>
-                    </div>
+                <div className="bg-white dark:bg-[#0a0f1d] p-5 rounded-lg border border-gray-200 dark:border-white/10 flex items-start gap-4">
+                  <svg className="w-8 h-8 text-[#30e38d] mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                  </svg>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Memory</p>
+                    <p className="text-3xl font-bold text-gray-900 dark:text-[#ffffff]">{formatBytes(project.pm2Info.memory)}</p>
                   </div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Memory</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{formatBytes(project.pm2Info.memory)}</p>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 hover:shadow-lg transition-shadow">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                      <svg className="w-6 h-6 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
+                <div className="bg-white dark:bg-[#0a0f1d] p-5 rounded-lg border border-gray-200 dark:border-white/10 flex items-start gap-4">
+                  <svg className="w-8 h-8 text-[#30e38d] mt-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Uptime</p>
+                    <p className="text-3xl font-bold text-gray-900 dark:text-[#ffffff]">{formatUptime(Date.now() - project.pm2Info.uptime)}</p>
                   </div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Uptime</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{formatUptime(Date.now() - project.pm2Info.uptime)}</p>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 hover:shadow-lg transition-shadow">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center">
-                      <svg className="w-6 h-6 text-orange-600 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                    </div>
+                <div className="bg-white dark:bg-[#0a0f1d] p-5 rounded-lg border border-gray-200 dark:border-white/10 flex items-start gap-4">
+                  <RotateCw className="w-8 h-8 text-[#30e38d] mt-1" />
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Restarts</p>
+                    <p className="text-3xl font-bold text-gray-900 dark:text-[#ffffff]">{project.pm2Info.restarts}</p>
                   </div>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Restarts</p>
-                  <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{project.pm2Info.restarts}</p>
                 </div>
               </div>
             )}
 
-            {/* Project Details Card */}
-            <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
-              <div className="bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-900 px-6 py-4 border-b border-gray-200 dark:border-gray-800">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Project Configuration</h3>
-              </div>
-              <div className="p-6 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                      Start Command
-                    </div>
-                    <div className="pl-6">
-                      <code className="block px-4 py-3 rounded-lg bg-gray-100 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 font-mono text-sm text-gray-900 dark:text-gray-100 break-all">
-                        {project.start_command}
-                      </code>
-                    </div>
-                  </div>
-
-                  {project.port && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                        </svg>
-                        Port
-                      </div>
-                      <div className="pl-6">
-                        <div className="inline-flex items-center px-4 py-3 rounded-lg bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800">
-                          <span className="text-2xl font-bold text-blue-700 dark:text-blue-400">{project.port}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="space-y-2 md:col-span-2">
-                    <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                      </svg>
-                      Project Path
-                    </div>
-                    <div className="pl-6">
-                      <code className="block px-4 py-3 rounded-lg bg-gray-100 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 font-mono text-xs text-gray-900 dark:text-gray-100 break-all">
-                        {project.path}
-                      </code>
-                    </div>
-                  </div>
-
-                  {project.deploy_method && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400">
-                        <GitBranch className="w-4 h-4" />
-                        Deploy Method
-                      </div>
-                      <div className="pl-6">
-                        <span className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium ${
-                          project.deploy_method === 'git'
-                            ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-800'
-                            : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700'
-                        }`}>
-                          {project.deploy_method === 'git' ? (
-                            <>
-                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                              </svg>
-                              Git Repository
-                            </>
-                          ) : (
-                            <>
-                              <Upload className="w-4 h-4" />
-                              ZIP Upload
-                            </>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400">
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      Created
-                    </div>
-                    <div className="pl-6">
-                      <p className="text-sm text-gray-900 dark:text-gray-100">
-                        {project.created_at ? new Date(project.created_at).toLocaleString() : 'N/A'}
-                      </p>
+            {/* Project Configuration */}
+            <div className="space-y-6">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-[#ffffff]">Project Configuration</h2>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-5">
+                <div className="col-span-1">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    <Play className="h-4 w-4" /> Start Command
+                  </label>
+                  <input 
+                    className="w-full bg-white dark:bg-[#0a0f1d] border border-gray-200 dark:border-white/10 rounded-md py-2 px-3 font-mono text-sm focus:ring-[#30e38d] focus:border-[#30e38d] text-gray-900 dark:text-[#ffffff]" 
+                    type="text" 
+                    value={project.start_command}
+                    readOnly
+                  />
+                </div>
+                <div className="col-span-1">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    <Globe className="h-4 w-4" /> Port
+                  </label>
+                  <input 
+                    className="w-auto bg-white dark:bg-[#0a0f1d] border border-gray-200 dark:border-white/10 rounded-md py-2 px-4 text-center font-mono text-sm focus:ring-[#30e38d] focus:border-[#30e38d] text-gray-900 dark:text-[#ffffff]" 
+                    type="number" 
+                    value={project.actualPort || project.port}
+                    readOnly
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    Project Path
+                  </label>
+                  <input 
+                    className="w-full bg-white dark:bg-[#0a0f1d] border border-gray-200 dark:border-white/10 rounded-md py-2 px-3 font-mono text-sm focus:ring-[#30e38d] focus:border-[#30e38d] text-gray-900 dark:text-[#ffffff]" 
+                    type="text" 
+                    value={project.path}
+                    readOnly
+                  />
+                </div>
+                {project.deploy_method && (
+                  <div className="col-span-1">
+                    <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                      <Upload className="h-4 w-4" /> Deploy Method
+                    </label>
+                    <div className="inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-sm font-medium px-3 py-1.5 rounded-md">
+                      {project.deploy_method === 'git' ? 'Git Repository' : 'ZIP Upload'}
                     </div>
                   </div>
+                )}
+                <div className="col-span-1">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Created
+                  </label>
+                  <p className="text-sm font-mono text-gray-900 dark:text-gray-300 pt-2">
+                    {project.created_at ? new Date(project.created_at).toLocaleString() : 'N/A'}
+                  </p>
                 </div>
               </div>
             </div>
-
           </div>
         )}
 
         {activeTab === 'logs' && (
-          <div className="grid gap-4 sm:gap-6">
-            <div className="flex flex-wrap justify-end gap-2 sm:gap-3 mb-2 sm:mb-4">
-              <button
-                onClick={handleClearLogs}
-                className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-              >
-                <Trash2 className="h-4 w-4" />
-                <span className="text-xs sm:text-sm font-medium">Clear</span>
-              </button>
-              <button
-                onClick={handleRefreshLogs}
-                disabled={isRefreshingLogs}
-                className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={`h-4 w-4 ${isRefreshingLogs ? 'animate-spin' : ''}`} />
-                <span className="text-xs sm:text-sm font-medium">Refresh</span>
-              </button>
+          <div className="space-y-4">
+            {/* Header Card */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-[#ffffff]">Application Logs</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Real-time logs from your application</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleClearLogs}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-gray-900 dark:text-[#ffffff] text-sm hover:bg-white/10 transition-colors"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Clear
+                </button>
+                <button
+                  onClick={handleRefreshLogs}
+                  disabled={isRefreshingLogs}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[#30e38d] text-black text-sm hover:bg-[#30e38d]/90 transition-colors disabled:opacity-50 font-medium"
+                >
+                  {isRefreshingLogs ? <RefreshCw className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Refresh
+                </button>
+              </div>
             </div>
 
-            <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 sm:p-6">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Application Logs</h3>
-              <div className="overflow-hidden rounded-lg border border-gray-800">
-                <pre className="bg-gray-950 dark:bg-black text-gray-300 p-4 overflow-x-auto max-h-[600px] text-xs sm:text-sm font-mono whitespace-pre-wrap break-all">
+            {/* Logs Container */}
+            <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#0a0f1d] overflow-hidden">
+              <div className="bg-white dark:bg-white/5 border-b border-gray-200 dark:border-white/10 px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-gray-600 dark:text-[#ffffff]">Terminal Output</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <span className="px-2 py-1 rounded bg-gray-100 dark:bg-white/5">UTF-8</span>
+                    <span>{logs.combined ? logs.combined.split('\n').length : 0} lines</span>
+                  </div>
+                </div>
+              </div>
+              <div className="relative">
+                <pre className="bg-white dark:bg-[#030712] text-gray-900 dark:text-[#ffffff] p-4 overflow-x-auto max-h-[600px] text-sm font-mono leading-relaxed">
                   {logs.combined ? logs.combined.split('\n').map((line, i) => (
-                    <div key={i} className={line.startsWith('[ERROR]') ? 'text-red-400' : 'text-green-400'}>
-                      {line}
+                    <div 
+                      key={i} 
+                      className={`hover:bg-gray-100 dark:hover:bg-white/5 px-2 -mx-2 rounded transition-colors ${
+                        line.includes('ERROR') || line.includes('Error') ? 'text-red-500 dark:text-red-400' : 
+                        line.includes('WARN') || line.includes('Warning') ? 'text-yellow-600 dark:text-yellow-400' : 
+                        line.includes('SUCCESS') || line.includes('✓') ? 'text-green-600 dark:text-green-400' :
+                        'text-gray-700 dark:text-gray-300'
+                      }`}
+                    >
+                      <span className="text-gray-400 dark:text-gray-600 select-none mr-4">{String(i + 1).padStart(3, ' ')}</span>
+                      {line || ' '}
                     </div>
-                  )) : 'No logs available yet'}
+                  )) : (
+                    <div className="text-center py-12">
+                      <FileText className="h-12 w-12 text-gray-300 dark:text-gray-700 mx-auto mb-3" />
+                      <p className="text-gray-500 dark:text-gray-500">No logs available yet</p>
+                      <p className="text-sm text-gray-400 dark:text-gray-600 mt-1">Logs will appear here when the application starts</p>
+                    </div>
+                  )}
                 </pre>
               </div>
             </div>
@@ -1251,43 +1239,83 @@ export default function ProjectDetailPage() {
 
                           {/* Deployment info */}
                           <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
-                              <h4 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                                {d.version || `Deployment #${deployments.length - index}`}
-                              </h4>
-                              {index === 0 && (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-medium">
-                                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                  </svg>
-                                  Current
-                                </span>
-                              )}
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${
-                                d.status === 'success'
-                                  ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                                  : d.status === 'failed'
-                                  ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                                  : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
-                              }`}>
-                                {d.status || 'unknown'}
-                              </span>
-                            </div>
-                            <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
+                            <div className="flex flex-col gap-2 mb-2">
+                              <div className="flex items-center gap-3">
+                                <h4 className="text-base font-bold text-gray-900 dark:text-gray-100">
+                                  Version {deployments.length - index}
+                                </h4>
+                                {index === 0 && (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-medium">
+                                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                    </svg>
+                                    Active
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center gap-2">
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                 </svg>
-                                <span>{new Date(d.deployed_at).toLocaleString()}</span>
+                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300" title={new Date(d.deployed_at).toLocaleString('en-US', { 
+                                  dateStyle: 'full', 
+                                  timeStyle: 'long'
+                                })}>
+                                  {(() => {
+                                    const date = new Date(d.deployed_at);
+                                    const now = new Date();
+                                    const diffMs = now.getTime() - date.getTime();
+                                    const diffMins = Math.floor(diffMs / 60000);
+                                    const diffHours = Math.floor(diffMs / 3600000);
+                                    const diffDays = Math.floor(diffMs / 86400000);
+                                    
+                                    if (diffMins < 1) return 'Just now';
+                                    if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
+                                    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+                                    if (diffDays === 1) return 'Yesterday at ' + date.toLocaleTimeString('en-IN', { 
+                                      hour: '2-digit', 
+                                      minute: '2-digit',
+                                      hour12: true 
+                                    });
+                                    if (diffDays < 7) return `${diffDays} days ago`;
+                                    
+                                    // Format: "Dec 7, 2025 at 2:30 PM"
+                                    return date.toLocaleDateString('en-US', { 
+                                      month: 'short', 
+                                      day: 'numeric', 
+                                      year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined 
+                                    }) + ' at ' + date.toLocaleTimeString('en-IN', { 
+                                      hour: '2-digit', 
+                                      minute: '2-digit',
+                                      hour12: true 
+                                    });
+                                  })()}
+                                </span>
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                                  d.status === 'success'
+                                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                                    : d.status === 'failed'
+                                    ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
+                                }`}>
+                                  {d.status || 'unknown'}
+                                </span>
                               </div>
+                            </div>
+                            <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
                               {d.deploy_method && (
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1.5">
                                   {d.deploy_method === 'git' ? (
-                                    <GitBranch className="w-4 h-4" />
+                                    <GitBranch className="w-3.5 h-3.5" />
                                   ) : (
-                                    <Upload className="w-4 h-4" />
+                                    <Upload className="w-3.5 h-3.5" />
                                   )}
-                                  <span>via {d.deploy_method === 'git' ? 'Git' : 'ZIP Upload'}</span>
+                                  <span>{d.deploy_method === 'git' ? 'Git Deploy' : 'ZIP Upload'}</span>
+                                </div>
+                              )}
+                              {d.version && (
+                                <div className="font-mono text-gray-400">
+                                  {d.version}
                                 </div>
                               )}
                             </div>

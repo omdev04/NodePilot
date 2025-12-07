@@ -1,11 +1,17 @@
 import { FastifyInstance } from 'fastify';
 import bcrypt from 'bcrypt';
-import { dbWrapper as db } from '../utils/database';
+import { dbWrapper as db, saveDb } from '../utils/database';
 import { z } from 'zod';
 
 const loginSchema = z.object({
   username: z.string().min(3).max(50),
   password: z.string().min(6),
+});
+
+const signupSchema = z.object({
+  username: z.string().min(3).max(50),
+  password: z.string().min(6),
+  email: z.string().email().optional(),
 });
 
 const changePasswordSchema = z.object({
@@ -20,6 +26,68 @@ const updateProfileSchema = z.object({
 });
 
 export default async function authRoutes(fastify: FastifyInstance) {
+  // Signup
+  fastify.post('/signup', async (request, reply) => {
+    try {
+      const { username, password, email } = signupSchema.parse(request.body);
+
+      // Check if username already exists
+      const existingUser = db
+        .prepare('SELECT id FROM users WHERE username = ?')
+        .get(username) as any;
+
+      if (existingUser) {
+        return reply.status(409).send({ error: 'Username already exists' });
+      }
+
+      // Check if email already exists (if provided)
+      if (email) {
+        const existingEmail = db
+          .prepare('SELECT id FROM users WHERE email = ?')
+          .get(email) as any;
+
+        if (existingEmail) {
+          return reply.status(409).send({ error: 'Email already registered' });
+        }
+      }
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // Insert new user with default 'user' role
+      const result = db.prepare(
+        'INSERT INTO users (username, password, email, role) VALUES (?, ?, ?, ?)'
+      ).run(username, hashedPassword, email || null, 'user');
+
+      saveDb();
+
+      const userId = result.lastInsertRowid;
+
+      // Generate token
+      const token = fastify.jwt.sign({
+        id: userId,
+        username: username,
+        role: 'user',
+      });
+
+      return {
+        token,
+        user: {
+          id: userId,
+          username: username,
+          email: email || null,
+          role: 'user',
+        },
+      };
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ error: 'Invalid input', details: error.errors });
+      }
+      console.error('Signup error:', error);
+      return reply.status(500).send({ error: 'Failed to create account' });
+    }
+  });
+
   // Login
   fastify.post('/login', async (request, reply) => {
     try {

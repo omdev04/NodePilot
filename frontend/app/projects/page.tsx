@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { DashboardSidebar } from '@/components/ui/dashboard-sidebar';
+import { Loader } from '@/components/ui/loader';
 import api from '@/lib/api';
 import { formatBytes } from '@/lib/utils';
 
@@ -71,16 +72,8 @@ export default function ProjectsListPage() {
         <DashboardSidebar open={sidebarOpen} setOpen={setSidebarOpen} />
         <main className="flex-1 p-8 overflow-y-auto">
           <div className="max-w-7xl mx-auto">
-            <div className="animate-pulse space-y-8">
-              <div className="space-y-2">
-                <div className="h-4 w-32 bg-gray-200 dark:bg-gray-800 rounded"></div>
-                <div className="h-10 w-48 bg-gray-200 dark:bg-gray-800 rounded"></div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="h-48 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"></div>
-                ))}
-              </div>
+            <div className="flex items-center justify-center min-h-[400px]">
+              <Loader message="Loading Projects" size="lg" />
             </div>
           </div>
         </main>

@@ -244,17 +244,27 @@ export class GitService {
         return { success: false, message: 'Not a valid Git repository' };
       }
 
-      // Check for uncommitted changes
+      // Check for uncommitted changes and auto-reset
       const statusCheck = await execAsync('git status --porcelain', {
         cwd: options.repoPath,
       });
 
       if (statusCheck.stdout.trim()) {
-        return {
-          success: false,
-          message: 'Repository has uncommitted changes. Please commit or stash them first.',
-          logs: statusCheck.stdout,
-        };
+        console.log('⚠️  Uncommitted changes detected, auto-resetting...');
+        logs += '⚠️  Uncommitted changes detected:\n' + statusCheck.stdout + '\n';
+        
+        // Reset to remote state (discard local changes)
+        await execAsync('git reset --hard HEAD', {
+          cwd: options.repoPath,
+        });
+        
+        // Clean untracked files
+        await execAsync('git clean -fd', {
+          cwd: options.repoPath,
+        });
+        
+        logs += '✅ Repository reset to clean state\n';
+        console.log('✅ Repository reset to clean state');
       }
 
       // Update remote URL with OAuth token if provided

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { DashboardSidebar } from '@/components/ui/dashboard-sidebar';
+import { Loader } from '@/components/ui/loader';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import api from '@/lib/api';
@@ -160,10 +161,8 @@ export default function SettingsPage() {
         <DashboardSidebar open={sidebarOpen} setOpen={setSidebarOpen} />
         <div className="flex-1 overflow-auto">
           <div className="p-8">
-            <div className="animate-pulse space-y-6">
-              <div className="h-8 w-48 bg-gray-200 dark:bg-gray-800 rounded"></div>
-              <div className="h-4 w-64 bg-gray-200 dark:bg-gray-800 rounded"></div>
-              <div className="h-64 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"></div>
+            <div className="flex items-center justify-center min-h-[400px]">
+              <Loader message="Loading Settings" size="lg" />
             </div>
           </div>
         </div>
@@ -179,21 +178,21 @@ export default function SettingsPage() {
         <main className="p-8">
           <div className="mx-auto max-w-4xl">
             {/* Header */}
-            <div className="mb-8">
-              <h1 className="text-gray-900 dark:text-white text-3xl font-bold leading-tight">Settings</h1>
-              <p className="text-gray-600 dark:text-gray-400 text-base font-normal leading-normal mt-1">Manage your account settings</p>
+            <div className="mb-5">
+              <h1 className="text-gray-900 dark:text-white text-2xl font-bold leading-tight">Settings</h1>
+              <p className="text-gray-600 dark:text-gray-400 text-sm font-normal leading-normal mt-0.5">Manage your account settings</p>
             </div>
 
             {/* Tabs */}
-            <div className="mb-8 border-b border-gray-200 dark:border-gray-800">
-              <nav className="-mb-px flex space-x-8">
+            <div className="mb-5 border-b border-gray-200 dark:border-gray-800">
+              <nav className="-mb-px flex space-x-6">
                 <button
                   onClick={() => setActiveTab('profile')}
                   className={`${
                     activeTab === 'profile'
                       ? 'border-gray-900 dark:border-white text-gray-900 dark:text-white'
                       : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-700'
-                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors`}
+                  } whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm flex items-center gap-1.5 transition-colors`}
                 >
                   <UserCircle className="h-4 w-4" />
                   Profile
@@ -204,7 +203,7 @@ export default function SettingsPage() {
                     activeTab === 'security'
                       ? 'border-gray-900 dark:border-white text-gray-900 dark:text-white'
                       : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-700'
-                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors`}
+                  } whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm flex items-center gap-1.5 transition-colors`}
                 >
                   <Shield className="h-4 w-4" />
                   Security
@@ -215,7 +214,7 @@ export default function SettingsPage() {
                     activeTab === 'oauth'
                       ? 'border-gray-900 dark:border-white text-gray-900 dark:text-white'
                       : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-700'
-                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors`}
+                  } whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm flex items-center gap-1.5 transition-colors`}
                 >
                   <GitBranch className="h-4 w-4" />
                   Git Providers
@@ -225,39 +224,39 @@ export default function SettingsPage() {
 
             {/* Profile Tab */}
             {activeTab === 'profile' && (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
-                <div className="mb-6">
-                  <h2 className="text-gray-900 dark:text-white text-xl font-bold leading-tight">Profile Information</h2>
-                  <p className="text-gray-600 dark:text-gray-400 mt-1">Update your account profile information</p>
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm">
+                <div className="mb-4">
+                  <h2 className="text-gray-900 dark:text-white text-lg font-bold leading-tight">Profile Information</h2>
+                  <p className="text-gray-600 dark:text-gray-400 text-sm mt-0.5">Update your account profile information</p>
                 </div>
 
-                <form onSubmit={handleProfileUpdate} className="space-y-8">
+                <form onSubmit={handleProfileUpdate} className="space-y-5">
                   {/* Avatar Selection */}
                   <div>
-                    <p className="text-gray-900 dark:text-white text-sm font-medium leading-normal mb-4 flex items-center gap-2">
+                    <p className="text-gray-900 dark:text-white text-xs font-medium leading-normal mb-3 flex items-center gap-1.5">
                       <ImageIcon className="h-4 w-4" />
                       Choose Avatar
                     </p>
                     
                     {/* Avatar Grid with Current Preview */}
-                    <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-4">
                       {/* Current Avatar Preview */}
                       <div className="relative">
                         <img 
                           src={profile.avatar_url || '/avatar/OSLO-1.png'} 
                           alt="Selected Avatar"
-                          className="w-24 h-24 rounded-full border-2 border-gray-900 dark:border-[#0099FF] object-cover"
+                          className="w-20 h-20 rounded-full border-2 border-gray-900 dark:border-[#0099FF] object-cover"
                         />
                       </div>
 
                       {/* Avatar Grid */}
-                      <div className="grid grid-cols-6 gap-4">
+                      <div className="grid grid-cols-6 gap-3">
                         {AVATARS.map((avatar) => (
                           <button
                             key={avatar}
                             type="button"
                             onClick={() => setProfile({ ...profile, avatar_url: `/avatar/${avatar}` })}
-                            className={`w-12 h-12 rounded-full cursor-pointer transition-opacity ${
+                            className={`w-10 h-10 rounded-full cursor-pointer transition-opacity ${
                               profile.avatar_url === `/avatar/${avatar}`
                                 ? 'opacity-100 ring-2 ring-gray-900 dark:ring-[#0099FF]'
                                 : 'opacity-50 hover:opacity-100'
@@ -276,7 +275,7 @@ export default function SettingsPage() {
 
                   {/* Username Field */}
                   <div className="relative">
-                    <label htmlFor="username" className="text-gray-900 dark:text-white text-sm font-medium leading-normal mb-2 flex items-center gap-2">
+                    <label htmlFor="username" className="text-gray-900 dark:text-white text-xs font-medium leading-normal mb-1 flex items-center gap-1.5">
                       <User className="h-4 w-4" />
                       Username
                     </label>
@@ -285,14 +284,14 @@ export default function SettingsPage() {
                       type="text"
                       value={profile.username}
                       onChange={(e) => setProfile({ ...profile, username: e.target.value })}
-                      className="flex w-full rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-[#0099FF]/50 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 h-12 placeholder:text-gray-500 dark:placeholder:text-gray-400 px-4 py-3 text-base font-normal leading-normal"
+                      className="flex w-full rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-[#0099FF]/50 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 h-10 placeholder:text-gray-500 dark:placeholder:text-gray-400 px-3 py-2 text-sm font-normal leading-normal"
                       required
                     />
                   </div>
 
                   {/* Email Field */}
                   <div className="relative">
-                    <label htmlFor="email" className="text-gray-900 dark:text-white text-sm font-medium leading-normal mb-2 flex items-center gap-2">
+                    <label htmlFor="email" className="text-gray-900 dark:text-white text-xs font-medium leading-normal mb-1 flex items-center gap-1.5">
                       <Mail className="h-4 w-4" />
                       Email Address
                     </label>
@@ -301,19 +300,19 @@ export default function SettingsPage() {
                       type="email"
                       value={profile.email}
                       onChange={(e) => setProfile({ ...profile, email: e.target.value })}
-                      className="flex w-full rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-[#0099FF]/50 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 h-12 placeholder:text-gray-500 dark:placeholder:text-gray-400 px-4 py-3 text-base font-normal leading-normal"
+                      className="flex w-full rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-[#0099FF]/50 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 h-10 placeholder:text-gray-500 dark:placeholder:text-gray-400 px-3 py-2 text-sm font-normal leading-normal"
                       placeholder="your.email@example.com"
                     />
                   </div>
 
                   {profileError && (
-                    <div className="p-4 bg-red-900/20 border border-red-800/50 text-red-400 rounded-lg text-sm">
+                    <div className="p-3 bg-red-900/20 border border-red-800/50 text-red-400 rounded-lg text-xs">
                       {profileError}
                     </div>
                   )}
 
                   {profileSuccess && (
-                    <div className="p-4 bg-green-900/20 border border-green-800/50 text-green-400 rounded-lg text-sm">
+                    <div className="p-3 bg-green-900/20 border border-green-800/50 text-green-400 rounded-lg text-xs">
                       {profileSuccess}
                     </div>
                   )}
@@ -323,7 +322,7 @@ export default function SettingsPage() {
                     <button
                       type="submit"
                       disabled={profileLoading}
-                      className="flex items-center justify-center gap-2 rounded-lg bg-gray-900 dark:bg-white px-5 py-3 text-sm font-bold text-white dark:text-gray-900 transition-opacity hover:opacity-90 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex items-center justify-center gap-1.5 rounded-lg bg-gray-900 dark:bg-white px-4 py-2 text-sm font-bold text-white dark:text-gray-900 transition-opacity hover:opacity-90 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Save className="h-4 w-4" />
                       {profileLoading ? 'Saving...' : 'Save Changes'}
@@ -337,10 +336,10 @@ export default function SettingsPage() {
             {/* OAuth Tab */}
             {activeTab === 'oauth' && (
               <div className="space-y-4">
-                <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
-                  <div className="mb-6">
-                    <h2 className="text-gray-900 dark:text-white text-xl font-bold leading-tight">Git Provider Integration</h2>
-                    <p className="text-gray-600 dark:text-gray-400 mt-1">
+                <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm">
+                  <div className="mb-4">
+                    <h2 className="text-gray-900 dark:text-white text-lg font-bold leading-tight">Git Provider Integration</h2>
+                    <p className="text-gray-600 dark:text-gray-400 text-sm mt-0.5">
                       Connect your GitHub, GitLab, or Bitbucket account to easily deploy repositories
                     </p>
                   </div>
@@ -350,18 +349,18 @@ export default function SettingsPage() {
             )}
             {/* Security Tab */}
             {activeTab === 'security' && (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
-                <div className="mb-6">
-                  <h2 className="text-gray-900 dark:text-white text-xl font-bold leading-tight">Change Password</h2>
-                  <p className="text-gray-600 dark:text-gray-400 mt-1">
+              <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm">
+                <div className="mb-4">
+                  <h2 className="text-gray-900 dark:text-white text-lg font-bold leading-tight">Change Password</h2>
+                  <p className="text-gray-600 dark:text-gray-400 text-sm mt-0.5">
                     Update your password to keep your account secure
                   </p>
                 </div>
 
-                <form onSubmit={handlePasswordChange} className="space-y-6">
+                <form onSubmit={handlePasswordChange} className="space-y-4">
                   {/* Current Password */}
-                  <div className="space-y-2">
-                    <label htmlFor="currentPassword" className="text-gray-900 dark:text-white text-sm font-medium leading-normal flex items-center gap-2">
+                  <div className="space-y-1.5">
+                    <label htmlFor="currentPassword" className="text-gray-900 dark:text-white text-xs font-medium leading-normal flex items-center gap-1.5">
                       <Lock className="h-4 w-4" />
                       Current Password
                     </label>
@@ -370,14 +369,14 @@ export default function SettingsPage() {
                       type="password"
                       value={passwordData.currentPassword}
                       onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
-                      className="flex w-full rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-[#0099FF]/50 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 h-12 placeholder:text-gray-500 dark:placeholder:text-gray-400 px-4 py-3 text-base font-normal leading-normal"
+                      className="flex w-full rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-[#0099FF]/50 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 h-10 placeholder:text-gray-500 dark:placeholder:text-gray-400 px-3 py-2 text-sm font-normal leading-normal"
                       required
                     />
                   </div>
 
                   {/* New Password */}
-                  <div className="space-y-2">
-                    <label htmlFor="newPassword" className="text-gray-900 dark:text-white text-sm font-medium leading-normal flex items-center gap-2">
+                  <div className="space-y-1.5">
+                    <label htmlFor="newPassword" className="text-gray-900 dark:text-white text-xs font-medium leading-normal flex items-center gap-1.5">
                       <Lock className="h-4 w-4" />
                       New Password
                     </label>
@@ -386,7 +385,7 @@ export default function SettingsPage() {
                       type="password"
                       value={passwordData.newPassword}
                       onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                      className="flex w-full rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-[#0099FF]/50 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 h-12 placeholder:text-gray-500 dark:placeholder:text-gray-400 px-4 py-3 text-base font-normal leading-normal"
+                      className="flex w-full rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-[#0099FF]/50 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 h-10 placeholder:text-gray-500 dark:placeholder:text-gray-400 px-3 py-2 text-sm font-normal leading-normal"
                       required
                     />
                     <p className="text-xs text-gray-600 dark:text-gray-400">
@@ -395,8 +394,8 @@ export default function SettingsPage() {
                   </div>
 
                   {/* Confirm Password */}
-                  <div className="space-y-2">
-                    <label htmlFor="confirmPassword" className="text-gray-900 dark:text-white text-sm font-medium leading-normal flex items-center gap-2">
+                  <div className="space-y-1.5">
+                    <label htmlFor="confirmPassword" className="text-gray-900 dark:text-white text-xs font-medium leading-normal flex items-center gap-1.5">
                       <Lock className="h-4 w-4" />
                       Confirm New Password
                     </label>
@@ -405,19 +404,19 @@ export default function SettingsPage() {
                       type="password"
                       value={passwordData.confirmPassword}
                       onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                      className="flex w-full rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-[#0099FF]/50 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 h-12 placeholder:text-gray-500 dark:placeholder:text-gray-400 px-4 py-3 text-base font-normal leading-normal"
+                      className="flex w-full rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-[#0099FF]/50 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 h-10 placeholder:text-gray-500 dark:placeholder:text-gray-400 px-3 py-2 text-sm font-normal leading-normal"
                       required
                     />
                   </div>
 
                   {passwordError && (
-                    <div className="p-4 bg-red-900/20 border border-red-800/50 text-red-400 rounded-lg text-sm">
+                    <div className="p-3 bg-red-900/20 border border-red-800/50 text-red-400 rounded-lg text-xs">
                       {passwordError}
                     </div>
                   )}
 
                   {passwordSuccess && (
-                    <div className="p-4 bg-green-900/20 border border-green-800/50 text-green-400 rounded-lg text-sm">
+                    <div className="p-3 bg-green-900/20 border border-green-800/50 text-green-400 rounded-lg text-xs">
                       {passwordSuccess}
                     </div>
                   )}
@@ -427,7 +426,7 @@ export default function SettingsPage() {
                     <button
                       type="submit"
                       disabled={passwordLoading}
-                      className="flex items-center justify-center gap-2 rounded-lg bg-gray-900 dark:bg-white px-5 py-3 text-sm font-bold text-white dark:text-gray-900 transition-opacity hover:opacity-90 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex items-center justify-center gap-1.5 rounded-lg bg-gray-900 dark:bg-white px-4 py-2 text-sm font-bold text-white dark:text-gray-900 transition-opacity hover:opacity-90 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Lock className="h-4 w-4" />
                       {passwordLoading ? 'Changing...' : 'Change Password'}
@@ -442,3 +441,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+

@@ -98,7 +98,17 @@ export class PM2Service {
 
   async deleteProcess(name: string): Promise<any> {
     await this.connect();
-    return await pm2Delete(name);
+    
+    try {
+      const result = await pm2Delete(name);
+      return result;
+    } catch (error: any) {
+      // If process doesn't exist, that's fine - it's already deleted
+      if (error.message?.includes('not found')) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async getProcessList(): Promise<any[]> {
@@ -126,6 +136,16 @@ export class PM2Service {
   formatProcessInfo(process: any) {
     if (!process) return null;
 
+    // Extract actual running port from PM2 environment variables
+    // PM2 stores the process environment in pm2_env.env
+    let actualPort = null;
+    if (process.pm2_env?.env) {
+      // Look for PORT variable in the process environment
+      actualPort = process.pm2_env.env.PORT || 
+                   process.pm2_env.env.port ||
+                   null;
+    }
+
     return {
       name: process.name,
       pid: process.pid,
@@ -134,6 +154,7 @@ export class PM2Service {
       cpu: process.monit?.cpu || 0,
       memory: process.monit?.memory || 0,
       restarts: process.pm2_env?.restart_time || 0,
+      actualPort: actualPort, // Add actual running port from PM2 env
     };
   }
 }

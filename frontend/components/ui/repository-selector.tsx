@@ -151,39 +151,36 @@ export function RepositorySelector({ onSelect, selectedRepo }: RepositorySelecto
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Label>Select Repository</Label>
+    <div className="space-y-3">
+      {/* Search */}
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            type="text"
+            placeholder="Search repositories..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10"
+          />
+        </div>
         <Button
-          variant="ghost"
-          size="sm"
+          variant="outline"
+          size="icon"
           onClick={fetchRepositories}
-          className="h-8"
+          title="Refresh"
         >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
+          <RefreshCw className="h-4 w-4" />
         </Button>
       </div>
 
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          type="text"
-          placeholder="Search repositories..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10"
-        />
-      </div>
-
       {/* Repository List */}
-      <div className="border rounded-lg max-h-[400px] overflow-y-auto">
+      <div className="border rounded-lg max-h-[300px] overflow-y-auto">
         {filteredRepos.length === 0 ? (
-          <div className="text-center py-12 px-4">
-            <GitBranch className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+          <div className="text-center py-8 px-4">
+            <GitBranch className="h-10 w-10 text-muted-foreground mx-auto mb-2 opacity-40" />
             <p className="text-sm text-muted-foreground">
-              {searchQuery ? 'No repositories found matching your search.' : 'No repositories available.'}
+              {searchQuery ? 'No repositories found' : 'No repositories available'}
             </p>
           </div>
         ) : (
@@ -192,50 +189,27 @@ export function RepositorySelector({ onSelect, selectedRepo }: RepositorySelecto
               <button
                 key={repo.id}
                 onClick={() => handleSelect(repo)}
-                className={`w-full text-left p-4 hover:bg-accent transition-colors ${
-                  selectedRepo?.id === repo.id ? 'bg-accent border-l-4 border-primary' : ''
+                className={`w-full text-left px-3 py-2.5 hover:bg-accent transition-colors ${
+                  selectedRepo?.id === repo.id ? 'bg-accent/50' : ''
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h4 className="font-medium truncate">{repo.fullName}</h4>
-                      {repo.isPrivate ? (
-                        <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                      ) : (
-                        <Unlock className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                      )}
-                    </div>
-                    {repo.description && (
-                      <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
-                        {repo.description}
-                      </p>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    {repo.isPrivate ? (
+                      <Lock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                    ) : (
+                      <Unlock className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                     )}
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <GitBranch className="h-3 w-3" />
-                        {repo.defaultBranch}
-                      </span>
-                      {repo.language && (
-                        <span className="px-2 py-0.5 bg-secondary rounded-full">
-                          {repo.language}
-                        </span>
-                      )}
-                      {repo.updatedAt && (
-                        <span>
-                          Updated {new Date(repo.updatedAt).toLocaleDateString()}
-                        </span>
-                      )}
-                    </div>
+                    <span className="font-medium text-sm truncate">{repo.fullName}</span>
                   </div>
                   {selectedRepo?.id === repo.id && (
-                    <div className="flex-shrink-0 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
+                    <div className="flex-shrink-0 h-4 w-4 rounded-full bg-primary flex items-center justify-center">
                       <svg
-                        className="h-3 w-3 text-primary-foreground"
+                        className="h-2.5 w-2.5 text-primary-foreground"
                         fill="none"
                         strokeLinecap="round"
                         strokeLinejoin="round"
-                        strokeWidth="2"
+                        strokeWidth="3"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
                       >
@@ -252,11 +226,16 @@ export function RepositorySelector({ onSelect, selectedRepo }: RepositorySelecto
 
       {/* Selected Repository Info */}
       {selectedRepo && (
-        <div className="rounded-lg bg-primary/10 dark:bg-primary/20 p-3 text-sm">
-          <p className="font-medium mb-1">Selected: {selectedRepo.fullName}</p>
-          <p className="text-xs text-muted-foreground">
-            Will deploy from branch: <span className="font-mono">{selectedRepo.defaultBranch}</span>
-          </p>
+        <div className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">{selectedRepo.fullName}</span>
+          {' • '}
+          <span>Branch: {selectedRepo.defaultBranch}</span>
+          {selectedRepo.language && (
+            <>
+              {' • '}
+              <span>{selectedRepo.language}</span>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -10,7 +10,7 @@
                          │ HTTP/WebSocket
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                       Nginx (Reverse Proxy)                  │
+│                       Caddy (Reverse Proxy)                  │
 │                    Port 80/443 → 3000/3001                   │
 └───────┬──────────────────────────────────────────┬──────────┘
         │                                           │
@@ -64,8 +64,8 @@
 
 ### Infrastructure
 - **Process Manager**: PM2
-- **Reverse Proxy**: Nginx
-- **SSL**: Let's Encrypt (Certbot)
+- **Reverse Proxy**: Caddy (with automatic HTTPS)
+- **SSL**: Let's Encrypt (automatic via Caddy)
 - **OS**: Ubuntu/Debian Linux
 
 ## Database Schema
@@ -409,7 +409,7 @@ find $BACKUP_DIR -mtime +7 -delete
 **Issue**: Upload fails
 - Check disk space
 - Verify file size limits
-- Check Nginx client_max_body_size
+- Check Caddy max upload size if needed (default is unlimited)
 
 ## Development Workflow
 

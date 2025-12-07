@@ -339,12 +339,28 @@ export default async function gitRoutes(fastify: FastifyInstance) {
 
       // Only deploy if the push is to the configured branch
       if (branch && branch === project.git_branch) {
-        console.log(`Webhook triggered for project ${id} on branch ${branch}`);
+        console.log(`🔔 Webhook triggered for project ${project.name} (ID: ${id}) on branch ${branch}`);
+        console.log(`📦 Commits: ${body.commits?.length || 0} | Pusher: ${body.pusher?.name || body.user_name || 'unknown'}`);
         
-        // Trigger async deployment (don't wait for completion)
-        deploymentService.redeployGitProject(parseInt(id)).catch(error => {
-          console.error(`Webhook deployment failed for project ${id}:`, error);
-        });
+        // Update deployment status to 'deploying'
+        db.prepare('UPDATE projects SET status = ? WHERE id = ?').run('deploying', id);
+        
+        // Trigger async deployment with auto-refresh (don't wait for completion)
+        (async () => {
+          try {
+            await deploymentService.redeployGitProject(parseInt(id));
+            
+            // Update status to running after successful deploy
+            db.prepare('UPDATE projects SET status = ? WHERE id = ?').run('running', id);
+            
+            console.log(`✅ Webhook deployment completed for project ${project.name}`);
+          } catch (error: any) {
+            console.error(`❌ Webhook deployment failed for project ${id}:`, error.message);
+            
+            // Update status to error
+            db.prepare('UPDATE projects SET status = ? WHERE id = ?').run('error', id);
+          }
+        })();
 
         return { 
           success: true, 

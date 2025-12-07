@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import path from 'path';
 import fs from 'fs/promises';
 import { z } from 'zod';
-import { dbWrapper as db } from '../utils/database';
+import { dbWrapper as db, saveDb } from '../utils/database';
 import { decrypt, encrypt } from '../utils/encryption';
 import { deploymentService } from '../services/deploymentService';
 import { pm2Service } from '../services/pm2Service';
@@ -22,6 +22,7 @@ export default async function projectRoutes(fastify: FastifyInstance) {
   // Create project
   fastify.post('/create', async (request, reply) => {
     try {
+      const user: any = request.user;
       const data = await request.file();
       
       if (!data) {
@@ -86,6 +87,7 @@ export default async function projectRoutes(fastify: FastifyInstance) {
         } catch (err) {
           envObj = {};
         }
+        
         return {
           ...project,
           env_vars: envObj,
@@ -114,6 +116,7 @@ export default async function projectRoutes(fastify: FastifyInstance) {
     }
 
     const pm2Info = await pm2Service.getProcessInfo((project as any).pm2_name);
+    const formattedPm2Info = pm2Service.formatProcessInfo(pm2Info);
 
     let envObj = {};
     try {
@@ -122,10 +125,22 @@ export default async function projectRoutes(fastify: FastifyInstance) {
       envObj = {};
     }
 
+    // Get actual running port - prioritize PM2 environment, then env vars, then configured port
+    // Only use actualPort if it exists and is not the NodePilot backend port (9001)
+    let actualPort = null;
+    if (formattedPm2Info?.actualPort && formattedPm2Info.actualPort !== '9001') {
+      actualPort = formattedPm2Info.actualPort;
+    } else if ((envObj as any).PORT || (envObj as any).port) {
+      actualPort = (envObj as any).PORT || (envObj as any).port;
+    } else {
+      actualPort = (project as any).port;
+    }
+
     return {
       ...project,
       env_vars: envObj,
-      pm2Info: pm2Service.formatProcessInfo(pm2Info),
+      pm2Info: formattedPm2Info,
+      actualPort: actualPort, // Add actual running port to response
     };
   });
 
@@ -164,19 +179,57 @@ export default async function projectRoutes(fastify: FastifyInstance) {
         return reply.status(400).send({ error: 'Invalid envVars' });
       }
 
+      // Encrypt and update database
       const encrypted = encrypt(JSON.stringify(envVars || {}));
       db.prepare('UPDATE projects SET env_vars = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(encrypted, id);
+      saveDb(); // Ensure changes are persisted
+
+      // Build complete environment with defaults
+      const fullEnv = {
+        PORT: project.port?.toString() || '3000',
+        NODE_ENV: 'production',
+        ...(envVars || {})
+      };
 
       // Update .env file on disk
       try {
-        const envLines = Object.entries({ PORT: project.port?.toString() || '3000', NODE_ENV: 'production', ...(envVars || {}) }).map(([k, v]) => {
+        const envLines = Object.entries(fullEnv).map(([k, v]) => {
           const needsQuotes = typeof v === 'string' && /\s|\n|\r|\t/.test(v);
           const safeVal = (v || '').toString().replace(/"/g, '\\"');
           return `${k}=${needsQuotes ? '"' + safeVal + '"' : safeVal}`;
         }).join('\n');
         await fs.writeFile(path.join(project.path, '.env'), envLines, { mode: 0o600 });
+        console.log(`✅ Updated .env file for project ${project.name}`);
       } catch (err) {
-        // ignore disk write errors
+        console.warn('Failed to write .env file:', err);
+      }
+
+      // If project is running, update PM2 environment and restart
+      try {
+        const processInfo = await pm2Service.getProcessInfo(project.pm2_name);
+        if (processInfo && processInfo.pm2_env?.status === 'online') {
+          console.log(`🔄 Restarting ${project.pm2_name} to apply new environment variables...`);
+          
+          // Delete and restart with new env vars (restart alone won't update env)
+          await pm2Service.deleteProcess(project.pm2_name);
+          
+          const { script, args, interpreter } = deploymentService['parseStartCommand'](project.start_command);
+          
+          await pm2Service.startProcess({
+            name: project.pm2_name,
+            script,
+            args,
+            interpreter,
+            cwd: project.path,
+            env: fullEnv,
+            error_file: path.join(project.path, 'error.log'),
+            out_file: path.join(project.path, 'out.log'),
+          });
+          
+          console.log(`✅ ${project.pm2_name} restarted with updated environment`);
+        }
+      } catch (err) {
+        console.warn('Failed to restart process with new env:', err);
       }
 
       return { success: true, envVars };
@@ -229,6 +282,7 @@ export default async function projectRoutes(fastify: FastifyInstance) {
       const content = (await data.toBuffer()).toString('utf-8');
       const lines = content.split(/\r?\n/);
       const envObj: Record<string, string> = {};
+      
       for (const raw of lines) {
         const line = raw.trim();
         if (!line || line.startsWith('#')) continue;
@@ -236,26 +290,69 @@ export default async function projectRoutes(fastify: FastifyInstance) {
         if (eq <= 0) continue;
         const key = line.slice(0, eq).trim();
         let val = line.slice(eq + 1).trim();
-        // remove surrounding quotes
+        
+        // Remove surrounding quotes
         if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
           val = val.slice(1, -1);
         }
+        
+        // Skip PORT and NODE_ENV from uploaded file (we manage these)
+        if (key === 'PORT' || key === 'NODE_ENV') continue;
+        
         envObj[key] = val;
       }
 
+      // Encrypt and save to database
       const encrypted = encrypt(JSON.stringify(envObj || {}));
       db.prepare('UPDATE projects SET env_vars = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(encrypted, id);
+      saveDb(); // Ensure changes are persisted
+
+      // Build complete environment with defaults
+      const fullEnv = {
+        PORT: project.port?.toString() || '3000',
+        NODE_ENV: 'production',
+        ...(envObj || {})
+      };
 
       // Write .env file on disk
       try {
-        const envLines = Object.entries({ PORT: project.port?.toString() || '3000', NODE_ENV: 'production', ...(envObj || {}) }).map(([k, v]) => {
+        const envLines = Object.entries(fullEnv).map(([k, v]) => {
           const needsQuotes = typeof v === 'string' && /\s|\n|\r|\t/.test(v);
           const safeVal = (v || '').toString().replace(/"/g, '\\"');
           return `${k}=${needsQuotes ? '"' + safeVal + '"' : safeVal}`;
         }).join('\n');
         await fs.writeFile(path.join(project.path, '.env'), envLines, { mode: 0o600 });
+        console.log(`✅ Updated .env file from upload for project ${project.name}`);
       } catch (err) {
         console.warn('Failed to write .env file on upload:', err);
+      }
+
+      // If project is running, restart with new env vars
+      try {
+        const processInfo = await pm2Service.getProcessInfo(project.pm2_name);
+        if (processInfo && processInfo.pm2_env?.status === 'online') {
+          console.log(`🔄 Restarting ${project.pm2_name} to apply uploaded environment variables...`);
+          
+          // Delete and restart with new env vars
+          await pm2Service.deleteProcess(project.pm2_name);
+          
+          const { script, args, interpreter } = deploymentService['parseStartCommand'](project.start_command);
+          
+          await pm2Service.startProcess({
+            name: project.pm2_name,
+            script,
+            args,
+            interpreter,
+            cwd: project.path,
+            env: fullEnv,
+            error_file: path.join(project.path, 'error.log'),
+            out_file: path.join(project.path, 'out.log'),
+          });
+          
+          console.log(`✅ ${project.pm2_name} restarted with uploaded environment`);
+        }
+      } catch (err) {
+        console.warn('Failed to restart process with uploaded env:', err);
       }
 
       return { success: true, envVars: envObj };
@@ -269,15 +366,66 @@ export default async function projectRoutes(fastify: FastifyInstance) {
   fastify.post('/:id/restart', async (request, reply) => {
     const { id } = request.params as { id: string };
     
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as any;
     
     if (!project) {
       return reply.status(404).send({ error: 'Project not found' });
     }
 
-    await pm2Service.restartProcess((project as any).pm2_name);
+    try {
+      // Load current env vars from database
+      let envObj = {};
+      try {
+        envObj = JSON.parse(decrypt(project.env_vars || '{}') || '{}');
+      } catch (err) {
+        console.warn('Failed to decrypt env vars, using empty object:', err);
+        envObj = {};
+      }
 
-    return { success: true, message: 'Project restarted' };
+      // Build complete environment with defaults
+      const fullEnv = {
+        PORT: project.port?.toString() || '3000',
+        NODE_ENV: 'production',
+        ...(envObj || {})
+      };
+
+      // Update .env file with current values
+      try {
+        const envLines = Object.entries(fullEnv).map(([k, v]) => {
+          const needsQuotes = typeof v === 'string' && /\s|\n|\r|\t/.test(v);
+          const safeVal = (v || '').toString().replace(/"/g, '\\"');
+          return `${k}=${needsQuotes ? '"' + safeVal + '"' : safeVal}`;
+        }).join('\n');
+        await fs.writeFile(path.join(project.path, '.env'), envLines, { mode: 0o600 });
+      } catch (err) {
+        console.warn('Failed to write .env file on restart:', err);
+      }
+
+      // Delete and restart to ensure env vars are reloaded
+      await pm2Service.deleteProcess(project.pm2_name);
+      
+      const { script, args, interpreter } = deploymentService['parseStartCommand'](project.start_command);
+      
+      await pm2Service.startProcess({
+        name: project.pm2_name,
+        script,
+        args,
+        interpreter,
+        cwd: project.path,
+        env: fullEnv,
+        error_file: path.join(project.path, 'error.log'),
+        out_file: path.join(project.path, 'out.log'),
+      });
+
+      console.log(`✅ Project ${project.name} restarted with fresh environment`);
+      return { success: true, message: 'Project restarted' };
+    } catch (error) {
+      console.error('Failed to restart project:', error);
+      return reply.status(500).send({ 
+        error: 'Failed to restart project',
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
   });
 
   // Stop project
@@ -305,36 +453,57 @@ export default async function projectRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ error: 'Project not found' });
     }
 
-    const { script, args } = deploymentService['parseStartCommand'](project.start_command);
-
-    let envObj = {};
     try {
-      envObj = JSON.parse(decrypt(project.env_vars || '{}') || '{}');
-    } catch (err) {
-      envObj = {};
-    }
+      // Load env vars from database
+      let envObj = {};
+      try {
+        envObj = JSON.parse(decrypt(project.env_vars || '{}') || '{}');
+      } catch (err) {
+        console.warn('Failed to decrypt env vars, using empty object:', err);
+        envObj = {};
+      }
 
-    try {
+      // Build complete environment with defaults
+      const fullEnv = {
+        PORT: project.port?.toString() || '3000',
+        NODE_ENV: 'production',
+        ...(envObj || {})
+      };
+
       // Write .env file
-      const envLines = Object.entries({ PORT: project.port?.toString() || '3000', NODE_ENV: 'production', ...(envObj || {}) }).map(([k, v]) => {
-        const needsQuotes = typeof v === 'string' && /\s|\n|\r|\t/.test(v);
-        const safeVal = (v || '').toString().replace(/"/g, '\\"');
-        return `${k}=${needsQuotes ? '"' + safeVal + '"' : safeVal}`;
-      }).join('\n');
-      await fs.writeFile(path.join(project.path, '.env'), envLines, { mode: 0o600 });
-    } catch (err) {
-      console.warn('Failed to write .env file for project start:', err);
+      try {
+        const envLines = Object.entries(fullEnv).map(([k, v]) => {
+          const needsQuotes = typeof v === 'string' && /\s|\n|\r|\t/.test(v);
+          const safeVal = (v || '').toString().replace(/"/g, '\\"');
+          return `${k}=${needsQuotes ? '"' + safeVal + '"' : safeVal}`;
+        }).join('\n');
+        await fs.writeFile(path.join(project.path, '.env'), envLines, { mode: 0o600 });
+      } catch (err) {
+        console.warn('Failed to write .env file for project start:', err);
+      }
+
+      const { script, args, interpreter } = deploymentService['parseStartCommand'](project.start_command);
+
+      await pm2Service.startProcess({
+        name: project.pm2_name,
+        script,
+        args,
+        interpreter,
+        cwd: project.path,
+        env: fullEnv,
+        error_file: path.join(project.path, 'error.log'),
+        out_file: path.join(project.path, 'out.log'),
+      });
+
+      console.log(`✅ Project ${project.name} started with environment variables`);
+      return { success: true, message: 'Project started' };
+    } catch (error) {
+      console.error('Failed to start project:', error);
+      return reply.status(500).send({ 
+        error: 'Failed to start project',
+        message: error instanceof Error ? error.message : String(error)
+      });
     }
-
-    await pm2Service.startProcess({
-      name: project.pm2_name,
-      script,
-      args,
-      cwd: project.path,
-      env: envObj,
-    });
-
-    return { success: true, message: 'Project started' };
   });
 
   // Redeploy project
@@ -367,9 +536,28 @@ export default async function projectRoutes(fastify: FastifyInstance) {
   fastify.delete('/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
 
-    await deploymentService.deleteProject(parseInt(id));
-
-    return { success: true, message: 'Project deleted' };
+    try {
+      const result = await deploymentService.deleteProject(parseInt(id));
+      
+      if (result.markedForDeletion) {
+        // Directory was locked, marked for background cleanup
+        return reply.status(200).send({ 
+          success: true,
+          warning: true,
+          message: 'Project deleted. Directory cleanup scheduled in background.',
+          markedPath: result.markedForDeletion,
+        });
+      }
+      
+      return { success: true, message: 'Project deleted successfully' };
+    } catch (error: any) {
+      console.error('Delete project error:', error);
+      
+      return reply.status(500).send({ 
+        error: 'Failed to delete project',
+        message: error.message || String(error),
+      });
+    }
   });
 
   // Get project logs
@@ -455,7 +643,7 @@ export default async function projectRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // Add domain & issue certificate (Certbot)
+  // Add domain & setup automatic SSL via Caddy
   fastify.post('/:id/domain', async (request, reply) => {
     const { id } = request.params as { id: string };
     const body = request.body as any;
@@ -476,28 +664,25 @@ export default async function projectRoutes(fastify: FastifyInstance) {
     }
 
     try {
-      // Create nginx config
-      const certServiceModule = await import('../services/certService');
-      const certService = certServiceModule.certService;
+      // Create Caddy config with automatic HTTPS
+      const caddyServiceModule = await import('../services/caddyService');
+      const caddyService = caddyServiceModule.caddyService;
 
       // Use project's port if defined, else default 3000
       const port = project.port || 3000;
-      await certService.createNginxConfig(project.name, domainClean, port);
-      await certService.reloadNginx();
+      await caddyService.createCaddyConfig(project.name, domainClean, port, email);
 
-      // Obtain certificate via certbot (may require root privileges)
-      await certService.obtainCertificate(domainClean, email || null);
+      // Setup SSL - Caddy handles this automatically
+      await caddyService.setupSSL(domainClean, email || null);
 
-      // Parse the cert paths
-      const { cert, key, expiresAt } = await certService.parseCertPaths(domainClean);
+      // Save domain to DB (no cert paths needed - Caddy manages everything)
+      await caddyService.saveDomainToDb(project.id, domain);
 
-      // Save domain & cert info to DB
-      await certService.saveCertToDb(project.id, domain, cert, key, expiresAt || undefined);
-
-      // Setup auto-renew (systemd timer or cron)
-      await certService.setupAutoRenew();
-
-      return { success: true, message: 'Domain added and certificate requested', domain };
+      return { 
+        success: true, 
+        message: 'Domain added with automatic SSL. Certificate will be obtained on first HTTPS request.', 
+        domain 
+      };
     } catch (error) {
       console.error('Failed to add domain:', error);
       return reply.status(500).send({ error: 'Failed to add domain', message: error instanceof Error ? error.message : String(error) });
@@ -599,12 +784,16 @@ export default async function projectRoutes(fastify: FastifyInstance) {
     }
 
     try {
-      // Remove from database
-      db.prepare('DELETE FROM domains WHERE id = ?').run(domainId);
+      // Remove Caddy config
+      const caddyServiceModule = await import('../services/caddyService');
+      const caddyService = caddyServiceModule.caddyService;
+      await caddyService.removeCaddyConfig(project.name);
       
-      // TODO: Remove nginx config and revoke SSL certificate if needed
-      // const certServiceModule = await import('../services/certService');
-      // await certServiceModule.certService.removeNginxConfig(domain.domain);
+      // Remove from database
+      await caddyService.removeDomainFromDb(domain.domain);
+      
+      // Reload Caddy to apply changes
+      await caddyService.reloadCaddy();
 
       return { success: true, message: 'Domain removed successfully' };
     } catch (error) {
@@ -890,6 +1079,58 @@ export default async function projectRoutes(fastify: FastifyInstance) {
     } catch (error) {
       console.error('Failed to delete:', error);
       return reply.status(500).send({ error: 'Failed to delete item' });
+    }
+  });
+
+  // Execute terminal command in project directory
+  fastify.post('/:id/terminal', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { command, cwd } = request.body as { command: string; cwd?: string };
+
+      if (!command || typeof command !== 'string') {
+        return reply.status(400).send({ error: 'Command is required' });
+      }
+
+      const project = db.getProject(parseInt(id));
+      if (!project) {
+        return reply.status(404).send({ error: 'Project not found' });
+      }
+
+      const projectsDir = path.join(process.cwd(), '..', 'projects');
+      const projectPath = path.join(projectsDir, project.name);
+      
+      // Use project path as working directory
+      const workingDir = projectPath;
+
+      // Execute command
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+
+      try {
+        const { stdout, stderr } = await execAsync(command, {
+          cwd: workingDir,
+          timeout: 60000, // 60 second timeout
+          maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+        });
+
+        const output = stdout + (stderr ? `\n${stderr}` : '');
+        const displayOutput = output.trim() || `✓ Command executed successfully\nCurrent directory: ${workingDir}`;
+        return { success: true, output: displayOutput };
+      } catch (execError: any) {
+        // Command executed but returned non-zero exit code
+        const errorOutput = execError.stdout + (execError.stderr ? `\n${execError.stderr}` : '');
+        return reply.status(200).send({ 
+          success: false, 
+          output: errorOutput.trim() || execError.message 
+        });
+      }
+    } catch (error: any) {
+      console.error('Terminal command error:', error);
+      return reply.status(500).send({ 
+        error: error.message || 'Failed to execute command' 
+      });
     }
   });
 }
