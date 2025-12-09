@@ -16,7 +16,7 @@ try {
 } catch (e) {
   console.warn('Optional module "archiver" not found; falling back to tar or raw copy for backups. To enable zip creation, run `npm install archiver` in backend.');
 }
-import { dbWrapper as db, Project } from '../utils/database';
+import { dbWrapper as db, Project, saveDb } from '../utils/database';
 import { encrypt, decrypt } from '../utils/encryption';
 
 const execAsync = promisify(exec);
@@ -45,25 +45,42 @@ export interface GitDeploymentConfig {
 }
 
 export class DeploymentService {
-  private projectsDir: string;
-  private backupsDir: string;
+  private readonly projectsDir: string;
+  private readonly backupsDir: string;
 
+  /**
+   * Initializes DeploymentService with projects and backups directory paths
+   */
   constructor() {
     this.projectsDir = process.env.PROJECTS_DIR || path.join(process.cwd(), '../projects');
     this.backupsDir = process.env.BACKUPS_DIR || path.join(process.cwd(), '../backups');
   }
 
-  async ensureBackupsDir() {
+  /**
+   * Ensures the backups directory exists, creating it if necessary
+   * @returns Promise that resolves when directory is ready
+   */
+  private async ensureBackupsDir(): Promise<void> {
     await fsPromises.mkdir(this.backupsDir, { recursive: true });
   }
 
-  private formatTimestamp(ts: number) {
+  /**
+   * Format timestamp as YYYY_MM_DD_HH-MM-SS string
+   * @param ts - Unix timestamp in milliseconds
+   * @returns Formatted timestamp string
+   */
+  private formatTimestamp(ts: number): string {
     const d = new Date(ts);
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}_${pad(d.getMonth() + 1)}_${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
   }
 
-  // Create a backup snapshot that includes a zipped project, env and pm2 ecosystem config
+  /**
+   * Create a backup snapshot including zipped project files, .env, and PM2 ecosystem config
+   * Attempts to create zip, falls back to tar.gz, and finally raw copy if both fail
+   * @param project - Project to backup
+   * @returns Backup information including version, folder path, archive path, and archive type
+   */
   async createBackupSnapshot(project: Project): Promise<{ version: string; backupFolder: string; archivePath?: string; archiveType: 'zip'|'tar'|'raw' }> {
     await this.ensureBackupsDir();
     const ts = Date.now();
@@ -80,18 +97,7 @@ export class DeploymentService {
     const tarFile = path.join(backupFolder, `snapshot_${version}.tar.gz`);
     try {
       if (archiver) {
-        // Create zip archive programmatically via archiver (cross-platform)
-        await new Promise<void>((resolve, reject) => {
-          const output = fs.createWriteStream(zipFile);
-          const archive = archiver('zip', { zlib: { level: 9 } });
-          output.on('close', () => resolve());
-          output.on('error', (err) => reject(err));
-          archive.on('error', (err) => reject(err));
-          archive.pipe(output);
-          // Add the project folder contents
-          archive.directory(project.path, false);
-          archive.finalize();
-        });
+        await this.createZipArchive(project.path, zipFile);
         archivePath = zipFile;
         archiveType = 'zip';
       } else {
@@ -100,76 +106,48 @@ export class DeploymentService {
     } catch (errZip) {
       try {
         // fallback to tar via node tar module
-        await tar.c({ gzip: true, file: tarFile, cwd: project.path }, ['.']);
+        await this.createTarArchive(project.path, tarFile);
         archivePath = tarFile;
         archiveType = 'tar';
       } catch (errTar) {
         // If both fail, attempt to copy directory contents as a last resort
-        const fallbackDir = path.join(backupFolder, `snapshot_${version}_raw`);
-        await fsPromises.mkdir(fallbackDir, { recursive: true });
-        const items = await fsPromises.readdir(project.path);
-        for (const item of items) {
-          const src = path.join(project.path, item);
-          const dest = path.join(fallbackDir, item);
-          await fsPromises.cp(src, dest, { recursive: true });
-        }
-        archivePath = fallbackDir;
+        archivePath = await this.createRawBackup(project.path, backupFolder, version);
         archiveType = 'raw';
       }
     }
 
     // Save .env if exists
-    try {
-      const envPath = path.join(project.path, '.env');
-      const stat = await fsPromises.stat(envPath).catch(() => null);
-      if (stat && stat.isFile()) {
-        const envBackup = path.join(backupFolder, `env_${version}`);
-        await fsPromises.copyFile(envPath, envBackup);
-      }
-    } catch (error) {
-      console.warn('Failed to backup .env: ', error);
-    }
+    await this.backupEnvFile(project.path, backupFolder, version);
 
     // Create pm2 ecosystem json from stored project config
-    try {
-      const decryptedVarsStr = decrypt(project.env_vars || '{}');
-      const decryptedVars = JSON.parse(decryptedVarsStr || '{}');
-      const { script, args, interpreter } = this.parseStartCommand(project.start_command);
-
-      const ecosys: any = {
-        apps: [
-          {
-            name: project.pm2_name,
-            script: script || 'npm',
-            args: args || undefined,
-            cwd: project.path,
-            interpreter: interpreter || undefined,
-            env: {
-              PORT: project.port?.toString() || '3000',
-              NODE_ENV: 'production',
-              ...decryptedVars,
-            },
-          },
-        ],
-      };
-      const ecosystemFile = path.join(backupFolder, `ecosystem_${version}.json`);
-      await fsPromises.writeFile(ecosystemFile, JSON.stringify(ecosys, null, 2));
-    } catch (error) {
-      console.warn('Failed to write ecosystem backup:', error);
-    }
+    await this.backupEcosystemConfig(project, backupFolder, version);
 
     console.log(`createBackupSnapshot -> version=${version} archiveType=${archiveType} archivePath=${archivePath}`);
     return { version, backupFolder, archivePath, archiveType };
   }
 
-  async ensureProjectsDir() {
+  /**
+   * Ensures the projects directory exists, creating it if necessary
+   * @returns Promise that resolves when directory is ready
+   */
+  private async ensureProjectsDir(): Promise<void> {
     await fsPromises.mkdir(this.projectsDir, { recursive: true });
   }
 
+  /**
+   * Sanitize project name by converting to lowercase and replacing invalid characters
+   * @param name - Raw project name
+   * @returns Sanitized project name safe for filesystem use
+   */
   sanitizeProjectName(name: string): string {
     return name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
   }
 
+  /**
+   * Create a new project from ZIP file upload
+   * @param config - Deployment configuration including project name, start command, port, and ZIP path
+   * @returns Created project record from database
+   */
   async createProject(config: DeploymentConfig): Promise<Project> {
     await this.ensureProjectsDir();
 
@@ -281,7 +259,10 @@ export class DeploymentService {
       INSERT INTO deployments (project_id, version, status, notes)
       VALUES (?, ?, ?, ?)
     `).run(result.lastInsertRowid, initialVersion, 'success', 'Initial deployment');
-    try { console.log(`Initial deployment record created for projectId ${result.lastInsertRowid}`); } catch (e) {}
+    
+    // Persist deployment record immediately
+    saveDb();
+    console.log(`✅ Initial deployment record created and saved for project ${sanitizedName} (ID: ${result.lastInsertRowid})`);
 
     const project = db
       .prepare('SELECT * FROM projects WHERE id = ?')
@@ -290,6 +271,12 @@ export class DeploymentService {
     return project;
   }
 
+  /**
+   * Create a new project from Git repository
+   * Clones repository, validates structure, installs dependencies, and starts PM2 process
+   * @param config - Git deployment configuration including repository URL, branch, build commands
+   * @returns Created project record from database
+   */
   async createProjectFromGit(config: GitDeploymentConfig): Promise<Project> {
     await this.ensureProjectsDir();
 
@@ -461,6 +448,10 @@ export class DeploymentService {
       INSERT INTO deployments (project_id, version, status, notes)
       VALUES (?, ?, ?, ?)
     `).run(result.lastInsertRowid, initialVersion, 'success', `Initial Git deployment from ${config.branch} (${currentCommit})`);
+    
+    // Persist deployment record immediately
+    saveDb();
+    console.log(`✅ Initial Git deployment record created and saved for project ${sanitizedName} (ID: ${result.lastInsertRowid})`);
 
     const project = db
       .prepare('SELECT * FROM projects WHERE id = ?')
@@ -469,6 +460,13 @@ export class DeploymentService {
     return project;
   }
 
+  /**
+   * Redeploy a Git-based project by pulling latest changes
+   * Creates backup before pull, handles dependency installation and build, rolls back on failure
+   * @param projectId - ID of the project to redeploy
+   * @param oauthToken - Optional OAuth token for private repository access
+   * @param oauthProvider - OAuth provider (github, gitlab, or bitbucket)
+   */
   async redeployGitProject(
     projectId: number, 
     oauthToken?: string, 
@@ -621,6 +619,12 @@ export class DeploymentService {
     }
   }
 
+  /**
+   * Redeploy a ZIP-based project with new ZIP file
+   * Creates backup before deployment, rolls back on failure
+   * @param projectId - ID of the project to redeploy
+   * @param zipPath - Path to the new ZIP file
+   */
   async redeployProject(projectId: number, zipPath: string): Promise<void> {
     const project = db
       .prepare('SELECT * FROM projects WHERE id = ?')
@@ -805,6 +809,13 @@ export class DeploymentService {
     }
   }
 
+  /**
+   * Rollback project to a previous deployment version from backup
+   * Restores project files, environment variables, and PM2 configuration
+   * @param projectId - ID of the project to rollback
+   * @param deploymentId - Optional deployment record ID to rollback to
+   * @param version - Optional version string to rollback to
+   */
   async rollbackToDeployment(projectId: number, deploymentId?: number, version?: string): Promise<void> {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as Project;
     if (!project) throw new Error('Project not found');
@@ -946,6 +957,12 @@ export class DeploymentService {
     saveDb(); // Ensure changes are persisted
   }
 
+  /**
+   * Delete a project including PM2 process and project files
+   * Marks directory for deferred deletion if locked (Windows file locking)
+   * @param projectId - ID of the project to delete
+   * @returns Result object with success flag and optional marked path for cleanup
+   */
   async deleteProject(projectId: number): Promise<{ success: boolean; markedForDeletion?: string }> {
     const project = db
       .prepare('SELECT * FROM projects WHERE id = ?')
@@ -997,6 +1014,11 @@ export class DeploymentService {
     };
   }
 
+  /**
+   * Extract ZIP file to destination and flatten single-folder archives
+   * @param zipPath - Path to ZIP file
+   * @param destination - Destination directory for extraction
+   */
   private async extractZip(zipPath: string, destination: string): Promise<void> {
     return new Promise((resolve, reject) => {
       fs.createReadStream(zipPath)
@@ -1048,6 +1070,12 @@ export class DeploymentService {
     });
   }
 
+  /**
+   * Parse start command into script, args, and interpreter for PM2
+   * Handles npm/yarn/pnpm commands and node scripts
+   * @param command - Raw start command string
+   * @returns Parsed command components for PM2 configuration
+   */
   private parseStartCommand(command: string): { script: string; args?: string; interpreter?: string } {
     const parts = command.trim().split(/\s+/);
     
@@ -1073,6 +1101,176 @@ export class DeploymentService {
       script: parts[0],
       args: parts.slice(1).join(' '),
     };
+  }
+
+  /**
+   * Create ZIP archive of project directory using archiver library
+   * @param projectPath - Path to project directory to archive
+   * @param zipFile - Output ZIP file path
+   */
+  private async createZipArchive(projectPath: string, zipFile: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const output = fs.createWriteStream(zipFile);
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      output.on('close', () => resolve());
+      output.on('error', (err) => reject(err));
+      archive.on('error', (err) => reject(err));
+      archive.pipe(output);
+      archive.directory(projectPath, false);
+      archive.finalize();
+    });
+  }
+
+  /**
+   * Create tar.gz archive of project directory
+   * @param projectPath - Path to project directory to archive
+   * @param tarFile - Output tar.gz file path
+   */
+  private async createTarArchive(projectPath: string, tarFile: string): Promise<void> {
+    await tar.c({ gzip: true, file: tarFile, cwd: projectPath }, ['.']);
+  }
+
+  /**
+   * Create raw directory copy backup as fallback when archiving fails
+   * @param projectPath - Path to project directory to backup
+   * @param backupFolder - Parent backup folder
+   * @param version - Version string for backup naming
+   * @returns Path to the raw backup directory
+   */
+  private async createRawBackup(projectPath: string, backupFolder: string, version: string): Promise<string> {
+    const fallbackDir = path.join(backupFolder, `snapshot_${version}_raw`);
+    await fsPromises.mkdir(fallbackDir, { recursive: true });
+    const items = await fsPromises.readdir(projectPath);
+    for (const item of items) {
+      const src = path.join(projectPath, item);
+      const dest = path.join(fallbackDir, item);
+      await fsPromises.cp(src, dest, { recursive: true });
+    }
+    return fallbackDir;
+  }
+
+  /**
+   * Backup .env file if it exists in project directory
+   * @param projectPath - Path to project directory
+   * @param backupFolder - Backup destination folder
+   * @param version - Version string for backup naming
+   */
+  private async backupEnvFile(projectPath: string, backupFolder: string, version: string): Promise<void> {
+    try {
+      const envPath = path.join(projectPath, '.env');
+      const stat = await fsPromises.stat(envPath).catch(() => null);
+      if (stat && stat.isFile()) {
+        const envBackup = path.join(backupFolder, `env_${version}`);
+        await fsPromises.copyFile(envPath, envBackup);
+      }
+    } catch (error) {
+      console.warn('Failed to backup .env: ', error);
+    }
+  }
+
+  /**
+   * Create and backup PM2 ecosystem configuration file
+   * @param project - Project record with configuration
+   * @param backupFolder - Backup destination folder
+   * @param version - Version string for backup naming
+   */
+  private async backupEcosystemConfig(project: Project, backupFolder: string, version: string): Promise<void> {
+    try {
+      const decryptedVarsStr = decrypt(project.env_vars || '{}');
+      const decryptedVars = JSON.parse(decryptedVarsStr || '{}');
+      const { script, args, interpreter } = this.parseStartCommand(project.start_command);
+
+      const ecosys: any = {
+        apps: [
+          {
+            name: project.pm2_name,
+            script: script || 'npm',
+            args: args || undefined,
+            cwd: project.path,
+            interpreter: interpreter || undefined,
+            env: {
+              PORT: project.port?.toString() || '3000',
+              NODE_ENV: 'production',
+              ...decryptedVars,
+            },
+          },
+        ],
+      };
+      const ecosystemFile = path.join(backupFolder, `ecosystem_${version}.json`);
+      await fsPromises.writeFile(ecosystemFile, JSON.stringify(ecosys, null, 2));
+    } catch (error) {
+      console.warn('Failed to write ecosystem backup:', error);
+    }
+  }
+
+  /**
+   * Build complete environment variables object for process runtime
+   * Includes defaults (PORT, NODE_ENV) and custom variables
+   * @param port - Port number for the application
+   * @param customEnvVars - Custom environment variables from config
+   * @returns Complete environment variables object
+   */
+  private buildProcessEnvironment(port: number | null | undefined, customEnvVars?: Record<string, string>): Record<string, string> {
+    return {
+      PORT: port?.toString() || '3000',
+      NODE_ENV: 'production',
+      ...(customEnvVars || {}),
+    };
+  }
+
+  /**
+   * Generate .env file from environment variables
+   * @param projectPath - Path to project directory
+   * @param envVars - Environment variables to write
+   */
+  private async generateEnvFile(projectPath: string, envVars: Record<string, string>): Promise<void> {
+    try {
+      const envLines = Object.entries(envVars).map(([k, v]) => {
+        const needsQuotes = typeof v === 'string' && /\s|\n|\r|\t/.test(v);
+        const safeVal = (v || '').toString().replace(/"/g, '\\"');
+        return `${k}=${needsQuotes ? '"' + safeVal + '"' : safeVal}`;
+      }).join('\n');
+      await fsPromises.writeFile(path.join(projectPath, '.env'), envLines, { mode: 0o600 });
+    } catch (error) {
+      console.warn('Failed to write .env file:', error);
+    }
+  }
+
+  /**
+   * Install project dependencies using npm
+   * @param projectPath - Path to project directory
+   * @param production - Whether to install production dependencies only
+   */
+  private async installDependencies(projectPath: string, production: boolean = true): Promise<void> {
+    const packageJsonPath = path.join(projectPath, 'package.json');
+    try {
+      await fsPromises.access(packageJsonPath);
+      console.log(`📦 Installing dependencies...`);
+      const flags = production ? '--production' : '';
+      await execAsync(`npm install ${flags}`, { cwd: projectPath });
+      console.log(`✅ Dependencies installed`);
+    } catch (error) {
+      console.log(`ℹ️  No package.json found or install failed`);
+    }
+  }
+
+  /**
+   * Wait for PM2 process to stop with polling and timeout
+   * @param pm2Name - PM2 process name
+   * @param maxWaitMs - Maximum wait time in milliseconds
+   */
+  private async waitForProcessStop(pm2Name: string, maxWaitMs: number = 5000): Promise<void> {
+    const pollingInterval = 200;
+    const deadline = Date.now() + maxWaitMs;
+    try {
+      while (Date.now() < deadline) {
+        const status = await pm2Service.getProcessStatus(pm2Name).catch(() => 'unknown');
+        if (status === 'stopped' || status === 'error') break;
+        await new Promise((res) => setTimeout(res, pollingInterval));
+      }
+    } catch (err) {
+      console.warn('Error while waiting for PM2 stop:', err);
+    }
   }
 }
 

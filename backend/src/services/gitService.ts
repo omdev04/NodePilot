@@ -32,18 +32,29 @@ export interface GitValidationResult {
 }
 
 export class GitService {
-  private logDir: string;
+  private readonly logDir: string;
 
+  /**
+   * Initializes GitService with log directory path
+   */
   constructor() {
     this.logDir = process.env.LOG_DIR || path.join(process.cwd(), '../logs');
   }
 
-  async ensureLogDir() {
+  /**
+   * Ensures the log directory exists, creating it if necessary
+   * @returns Promise that resolves when directory is ready
+   */
+  private async ensureLogDir(): Promise<void> {
     await fs.mkdir(this.logDir, { recursive: true });
   }
 
   /**
    * Inject OAuth token into Git URL for authenticated access
+   * @param url - The Git repository URL to authenticate
+   * @param token - OAuth access token
+   * @param provider - Git provider (github, gitlab, or bitbucket)
+   * @returns Authenticated URL with embedded credentials
    */
   private injectOAuthToken(url: string, token: string, provider: 'github' | 'gitlab' | 'bitbucket'): string {
     try {
@@ -71,6 +82,8 @@ export class GitService {
   /**
    * Sanitize and validate Git repository URL
    * Prevents command injection and validates format
+   * @param url - The repository URL to validate and sanitize
+   * @returns Validation result with sanitized URL or error message
    */
   sanitizeRepoUrl(url: string): { isValid: boolean; sanitized: string; error?: string } {
     const trimmed = url.trim();
@@ -99,6 +112,8 @@ export class GitService {
 
   /**
    * Sanitize branch name to prevent command injection
+   * @param branch - Branch name to validate and sanitize
+   * @returns Validation result with sanitized branch name or error message
    */
   sanitizeBranchName(branch: string): { isValid: boolean; sanitized: string; error?: string } {
     const trimmed = branch.trim();
@@ -117,7 +132,9 @@ export class GitService {
   }
 
   /**
-   * Clone a Git repository with security checks
+   * Clone a Git repository with security checks and OAuth support
+   * @param options - Clone configuration including URL, branch, target path, and OAuth credentials
+   * @returns Result object with success status, message, and operation logs
    */
   async cloneRepository(options: GitCloneOptions): Promise<{ success: boolean; message: string; logs?: string }> {
     await this.ensureLogDir();
@@ -151,19 +168,7 @@ export class GitService {
       }
 
       // Build clone command with security
-      const cloneArgs = [
-        'clone',
-        '--branch', sanitizedBranch,
-        '--single-branch',
-      ];
-
-      if (options.shallow || options.depth) {
-        cloneArgs.push('--depth', String(options.depth || 1));
-      }
-
-      cloneArgs.push(finalUrl, options.targetPath);
-
-      const command = `git ${cloneArgs.join(' ')}`;
+      const command = this.buildCloneCommand(finalUrl, sanitizedBranch, options.targetPath, options.shallow, options.depth);
       const timestamp = new Date().toISOString();
       logs = `[${timestamp}] Executing: ${command}\n`;
       
@@ -196,32 +201,18 @@ export class GitService {
       console.error('❌ Git clone failed:', error.message);
       console.error('❌ Git stderr:', error.stderr || 'No stderr output');
 
-      // Parse common Git errors
-      let userMessage = 'Failed to clone repository';
-      const fullError = `${error.message} ${error.stderr || ''}`.toLowerCase();
-      
-      if (fullError.includes('repository not found') || fullError.includes('could not read')) {
-        userMessage = 'Repository not found or access denied. Check the URL and permissions.';
-      } else if (fullError.includes('branch') && fullError.includes('not found')) {
-        userMessage = `Branch "${sanitizedBranch}" not found in repository.`;
-      } else if (fullError.includes('authentication') || fullError.includes('credentials')) {
-        userMessage = 'Authentication failed. Repository may be private or token is invalid.';
-      } else if (fullError.includes('timeout')) {
-        userMessage = 'Clone operation timed out. Repository may be too large or network is slow.';
-      } else if (fullError.includes('fatal')) {
-        userMessage = `Git error: ${error.stderr || error.message}`;
-      }
-
       return {
         success: false,
-        message: userMessage,
+        message: this.parseGitCloneError(error, sanitizedBranch),
         logs,
       };
     }
   }
 
   /**
-   * Pull latest changes from Git repository
+   * Pull latest changes from Git repository with auto-reset on uncommitted changes
+   * @param options - Pull configuration including repository path, branch, and OAuth credentials
+   * @returns Result object with success status, message, changes summary, and operation logs
    */
   async pullRepository(options: GitPullOptions): Promise<{ success: boolean; message: string; changes?: string; logs?: string }> {
     await this.ensureLogDir();
@@ -269,16 +260,7 @@ export class GitService {
 
       // Update remote URL with OAuth token if provided
       if (options.oauthToken && options.oauthProvider) {
-        const remoteUrlResult = await execAsync('git remote get-url origin', {
-          cwd: options.repoPath,
-        });
-        const currentUrl = remoteUrlResult.stdout.trim();
-        const authenticatedUrl = this.injectOAuthToken(currentUrl, options.oauthToken, options.oauthProvider);
-        
-        // Temporarily set remote URL with token for this operation
-        await execAsync(`git remote set-url origin "${authenticatedUrl}"`, {
-          cwd: options.repoPath,
-        });
+        await this.updateRemoteWithOAuth(options.repoPath, options.oauthToken, options.oauthProvider);
       }
 
       // Fetch and pull
@@ -333,7 +315,9 @@ export class GitService {
   }
 
   /**
-   * List available branches in a repository
+   * List available remote branches in a repository
+   * @param repoPath - Absolute path to the Git repository
+   * @returns Result object with success status and array of branch names
    */
   async listBranches(repoPath: string): Promise<{ success: boolean; branches: string[]; error?: string }> {
     try {
@@ -354,7 +338,9 @@ export class GitService {
   }
 
   /**
-   * Get current branch and commit info
+   * Get current branch and commit information from repository
+   * @param repoPath - Absolute path to the Git repository
+   * @returns Repository information including branch, commit hash, message, author, and date
    */
   async getRepoInfo(repoPath: string): Promise<{
     success: boolean;
@@ -386,7 +372,9 @@ export class GitService {
   }
 
   /**
-   * Validate a cloned repository structure
+   * Validate a cloned repository structure for Node.js project requirements
+   * @param repoPath - Absolute path to the repository to validate
+   * @returns Validation result with flags for required components, errors, and warnings
    */
   async validateRepository(repoPath: string): Promise<GitValidationResult> {
     const result: GitValidationResult = {
@@ -399,59 +387,16 @@ export class GitService {
 
     try {
       // Check if .git exists
-      const gitPath = path.join(repoPath, '.git');
-      try {
-        await fs.access(gitPath);
-        result.hasGitFolder = true;
-      } catch {
-        result.errors.push('Missing .git folder - not a valid Git repository');
-        result.isValid = false;
-      }
+      await this.validateGitFolder(repoPath, result);
 
       // Check for package.json
-      const packageJsonPath = path.join(repoPath, 'package.json');
-      try {
-        await fs.access(packageJsonPath);
-        result.hasPackageJson = true;
-
-        // Validate package.json content
-        const content = await fs.readFile(packageJsonPath, 'utf-8');
-        const packageJson = JSON.parse(content);
-
-        if (!packageJson.name) {
-          result.warnings.push('package.json missing "name" field');
-        }
-
-        if (!packageJson.scripts?.start && !packageJson.main) {
-          result.warnings.push('No "start" script or "main" entry point found in package.json');
-        }
-      } catch {
-        result.errors.push('No package.json found - ensure this is a Node.js project');
-        result.isValid = false;
-      }
+      await this.validatePackageJson(repoPath, result);
 
       // Check for node_modules (should not be committed)
-      const nodeModulesPath = path.join(repoPath, 'node_modules');
-      try {
-        const stat = await fs.stat(nodeModulesPath);
-        if (stat.isDirectory()) {
-          result.warnings.push('node_modules folder found in repository - this should typically be .gitignored');
-        }
-      } catch {
-        // node_modules not found - this is good
-      }
+      await this.checkNodeModules(repoPath, result);
 
       // Check for .env files (security warning)
-      const envFiles = ['.env', '.env.local', '.env.production'];
-      for (const envFile of envFiles) {
-        const envPath = path.join(repoPath, envFile);
-        try {
-          await fs.access(envPath);
-          result.warnings.push(`Found ${envFile} in repository - sensitive data should not be committed`);
-        } catch {
-          // File not found - this is good
-        }
-      }
+      await this.checkEnvFiles(repoPath, result);
 
     } catch (error: any) {
       result.errors.push(`Validation error: ${error.message}`);
@@ -462,7 +407,11 @@ export class GitService {
   }
 
   /**
-   * Verify webhook signature for GitHub
+   * Verify webhook signature for GitHub using HMAC-SHA256
+   * @param payload - Raw webhook payload string
+   * @param signature - GitHub signature header (X-Hub-Signature-256)
+   * @param secret - Webhook secret configured in GitHub
+   * @returns True if signature is valid, false otherwise
    */
   verifyGitHubWebhook(payload: string, signature: string, secret: string): boolean {
     if (!signature || !signature.startsWith('sha256=')) {
@@ -476,14 +425,20 @@ export class GitService {
   }
 
   /**
-   * Verify webhook signature for GitLab
+   * Verify webhook token for GitLab
+   * @param token - GitLab webhook token from X-Gitlab-Token header
+   * @param secret - Webhook secret configured in GitLab
+   * @returns True if token matches secret, false otherwise
    */
   verifyGitLabWebhook(token: string, secret: string): boolean {
     return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(secret));
   }
 
   /**
-   * Reset repository to clean state (dangerous - use with caution)
+   * Reset repository to clean state, discarding all uncommitted changes
+   * WARNING: This operation is destructive and cannot be undone
+   * @param repoPath - Absolute path to the repository to reset
+   * @returns Result object with success status and message
    */
   async resetRepository(repoPath: string): Promise<{ success: boolean; message: string }> {
     try {
@@ -504,8 +459,10 @@ export class GitService {
   }
 
   /**
-   * Check if repository needs dependency installation
-   * Compares package.json and package-lock.json timestamps
+   * Check if repository needs dependency installation by comparing file timestamps
+   * Returns true if node_modules is missing or package-lock.json is newer
+   * @param repoPath - Absolute path to the repository
+   * @returns True if npm install should be run, false otherwise
    */
   async needsDependencyInstall(repoPath: string): Promise<boolean> {
     try {
@@ -528,6 +485,153 @@ export class GitService {
     } catch {
       // If we can't determine, assume we need to install
       return true;
+    }
+  }
+
+  /**
+   * Parse Git clone error and return user-friendly message
+   * @param error - Error object from git clone operation
+   * @param branchName - Branch name that was attempted
+   * @returns User-friendly error message
+   */
+  private parseGitCloneError(error: any, branchName: string): string {
+    const fullError = `${error.message} ${error.stderr || ''}`.toLowerCase();
+    
+    if (fullError.includes('repository not found') || fullError.includes('could not read')) {
+      return 'Repository not found or access denied. Check the URL and permissions.';
+    } else if (fullError.includes('branch') && fullError.includes('not found')) {
+      return `Branch "${branchName}" not found in repository.`;
+    } else if (fullError.includes('authentication') || fullError.includes('credentials')) {
+      return 'Authentication failed. Repository may be private or token is invalid.';
+    } else if (fullError.includes('timeout')) {
+      return 'Clone operation timed out. Repository may be too large or network is slow.';
+    } else if (fullError.includes('fatal')) {
+      return `Git error: ${error.stderr || error.message}`;
+    }
+    
+    return 'Failed to clone repository';
+  }
+
+  /**
+   * Build git clone command with security and options
+   * @param url - Repository URL to clone
+   * @param branch - Branch name to clone
+   * @param targetPath - Target directory path
+   * @param shallow - Whether to perform shallow clone
+   * @param depth - Clone depth for shallow clone
+   * @returns Complete git clone command string
+   */
+  private buildCloneCommand(url: string, branch: string, targetPath: string, shallow?: boolean, depth?: number): string {
+    const cloneArgs = [
+      'clone',
+      '--branch', branch,
+      '--single-branch',
+    ];
+
+    if (shallow || depth) {
+      cloneArgs.push('--depth', String(depth || 1));
+    }
+
+    cloneArgs.push(url, targetPath);
+
+    return `git ${cloneArgs.join(' ')}`;
+  }
+
+  /**
+   * Update remote URL with OAuth token for authenticated operations
+   * @param repoPath - Path to the repository
+   * @param token - OAuth access token
+   * @param provider - Git provider (github, gitlab, or bitbucket)
+   */
+  private async updateRemoteWithOAuth(repoPath: string, token: string, provider: 'github' | 'gitlab' | 'bitbucket'): Promise<void> {
+    const remoteUrlResult = await execAsync('git remote get-url origin', {
+      cwd: repoPath,
+    });
+    const currentUrl = remoteUrlResult.stdout.trim();
+    const authenticatedUrl = this.injectOAuthToken(currentUrl, token, provider);
+    
+    // Temporarily set remote URL with token for this operation
+    await execAsync(`git remote set-url origin "${authenticatedUrl}"`, {
+      cwd: repoPath,
+    });
+  }
+
+  /**
+   * Validate that repository has .git folder
+   * @param repoPath - Path to the repository
+   * @param result - Validation result object to update
+   */
+  private async validateGitFolder(repoPath: string, result: GitValidationResult): Promise<void> {
+    const gitPath = path.join(repoPath, '.git');
+    try {
+      await fs.access(gitPath);
+      result.hasGitFolder = true;
+    } catch {
+      result.errors.push('Missing .git folder - not a valid Git repository');
+      result.isValid = false;
+    }
+  }
+
+  /**
+   * Validate package.json existence and content
+   * @param repoPath - Path to the repository
+   * @param result - Validation result object to update
+   */
+  private async validatePackageJson(repoPath: string, result: GitValidationResult): Promise<void> {
+    const packageJsonPath = path.join(repoPath, 'package.json');
+    try {
+      await fs.access(packageJsonPath);
+      result.hasPackageJson = true;
+
+      // Validate package.json content
+      const content = await fs.readFile(packageJsonPath, 'utf-8');
+      const packageJson = JSON.parse(content);
+
+      if (!packageJson.name) {
+        result.warnings.push('package.json missing "name" field');
+      }
+
+      if (!packageJson.scripts?.start && !packageJson.main) {
+        result.warnings.push('No "start" script or "main" entry point found in package.json');
+      }
+    } catch {
+      result.errors.push('No package.json found - ensure this is a Node.js project');
+      result.isValid = false;
+    }
+  }
+
+  /**
+   * Check for node_modules folder in repository (should not be committed)
+   * @param repoPath - Path to the repository
+   * @param result - Validation result object to update
+   */
+  private async checkNodeModules(repoPath: string, result: GitValidationResult): Promise<void> {
+    const nodeModulesPath = path.join(repoPath, 'node_modules');
+    try {
+      const stat = await fs.stat(nodeModulesPath);
+      if (stat.isDirectory()) {
+        result.warnings.push('node_modules folder found in repository - this should typically be .gitignored');
+      }
+    } catch {
+      // node_modules not found - this is good
+    }
+  }
+
+  /**
+   * Check for .env files in repository (security warning)
+   * @param repoPath - Path to the repository
+   * @param result - Validation result object to update
+   */
+  private async checkEnvFiles(repoPath: string, result: GitValidationResult): Promise<void> {
+    const envFiles = ['.env', '.env.local', '.env.production'];
+    for (const envFile of envFiles) {
+      const envPath = path.join(repoPath, envFile);
+      try {
+        await fs.access(envPath);
+        result.warnings.push(`Found ${envFile} in repository - sensitive data should not be committed`);
+      } catch {
+        // File not found - this is good
+      }
     }
   }
 }

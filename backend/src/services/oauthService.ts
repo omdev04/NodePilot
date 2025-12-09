@@ -29,7 +29,10 @@ interface Repository {
 
 export class OAuthService {
   /**
-   * Get configuration for a provider (reads from env vars at runtime)
+   * Get OAuth configuration for a specific provider
+   * Reads client credentials from environment variables at runtime
+   * @param provider - OAuth provider (github, gitlab, or bitbucket)
+   * @returns Provider-specific OAuth configuration
    */
   private getConfig(provider: OAuthProvider): OAuthConfig {
     const configs: Record<OAuthProvider, OAuthConfig> = {
@@ -63,7 +66,11 @@ export class OAuthService {
   }
 
   /**
-   * Get OAuth authorization URL
+   * Generate OAuth authorization URL for user to initiate OAuth flow
+   * @param provider - OAuth provider (github, gitlab, or bitbucket)
+   * @param userId - User ID to encode in state parameter
+   * @returns Authorization URL with all required parameters
+   * @throws Error if provider OAuth is not configured
    */
   getAuthorizationUrl(provider: OAuthProvider, userId: number): string {
     const config = this.getConfig(provider);
@@ -87,7 +94,13 @@ export class OAuthService {
   }
 
   /**
-   * Exchange authorization code for access token
+   * Exchange OAuth authorization code for access token
+   * Stores encrypted tokens in database after successful exchange
+   * @param provider - OAuth provider (github, gitlab, or bitbucket)
+   * @param code - Authorization code from OAuth callback
+   * @param userId - User ID to associate tokens with
+   * @returns Access token, optional refresh token, and expiration time
+   * @throws Error if token exchange fails
    */
   async exchangeCodeForToken(
     provider: OAuthProvider,
@@ -139,7 +152,13 @@ export class OAuthService {
   }
 
   /**
-   * Save OAuth tokens to database
+   * Save encrypted OAuth tokens to database
+   * Calculates and stores token expiration time if provided
+   * @param userId - User ID to associate tokens with
+   * @param provider - OAuth provider (github, gitlab, or bitbucket)
+   * @param accessToken - OAuth access token to encrypt and store
+   * @param refreshToken - Optional refresh token to encrypt and store
+   * @param expiresIn - Optional token lifetime in seconds
    */
   private async saveTokens(
     userId: number,
@@ -177,7 +196,9 @@ export class OAuthService {
   }
 
   /**
-   * Get user's OAuth token
+   * Retrieve and decrypt user's stored OAuth token
+   * @param userId - User ID to fetch token for
+   * @returns Provider and decrypted token, or null if not found
    */
   getUserToken(userId: number): { provider: OAuthProvider; token: string } | null {
     const user = db.prepare('SELECT oauth_provider, oauth_token FROM users WHERE id = ?').get(userId) as any;
@@ -194,7 +215,12 @@ export class OAuthService {
   }
 
   /**
-   * List user's repositories
+   * List user's accessible repositories from their connected Git provider
+   * @param userId - User ID to fetch repositories for
+   * @param page - Page number for pagination (default: 1)
+   * @param perPage - Number of repositories per page (default: 30)
+   * @returns Array of repository objects with metadata
+   * @throws Error if user not authenticated or API request fails
    */
   async listRepositories(userId: number, page: number = 1, perPage: number = 30): Promise<Repository[]> {
     const tokenData = this.getUserToken(userId);
@@ -218,7 +244,12 @@ export class OAuthService {
   }
 
   /**
-   * List GitHub repositories
+   * Fetch repositories from GitHub API
+   * @param token - GitHub OAuth access token
+   * @param page - Page number for pagination
+   * @param perPage - Number of repositories per page
+   * @returns Array of normalized repository objects
+   * @throws Error if API request fails
    */
   private async listGitHubRepositories(token: string, page: number, perPage: number): Promise<Repository[]> {
     try {
@@ -254,7 +285,12 @@ export class OAuthService {
   }
 
   /**
-   * List GitLab repositories
+   * Fetch repositories from GitLab API
+   * @param token - GitLab OAuth access token
+   * @param page - Page number for pagination
+   * @param perPage - Number of repositories per page
+   * @returns Array of normalized repository objects
+   * @throws Error if API request fails
    */
   private async listGitLabRepositories(token: string, page: number, perPage: number): Promise<Repository[]> {
     try {
@@ -290,7 +326,12 @@ export class OAuthService {
   }
 
   /**
-   * List Bitbucket repositories
+   * Fetch repositories from Bitbucket API
+   * @param token - Bitbucket OAuth access token
+   * @param page - Page number for pagination
+   * @param perPage - Number of repositories per page
+   * @returns Array of normalized repository objects
+   * @throws Error if API request fails
    */
   private async listBitbucketRepositories(token: string, page: number, perPage: number): Promise<Repository[]> {
     try {
@@ -325,7 +366,11 @@ export class OAuthService {
   }
 
   /**
-   * Get repository branches
+   * Get list of branches for a specific repository
+   * @param userId - User ID to use for authentication
+   * @param repoFullName - Full repository name (e.g., 'owner/repo')
+   * @returns Array of branch names
+   * @throws Error if user not authenticated or API request fails
    */
   async getRepositoryBranches(userId: number, repoFullName: string): Promise<string[]> {
     const tokenData = this.getUserToken(userId);
@@ -348,6 +393,13 @@ export class OAuthService {
     }
   }
 
+  /**
+   * Fetch branches from GitHub API
+   * @param token - GitHub OAuth access token
+   * @param repoFullName - Repository full name (owner/repo)
+   * @returns Array of branch names
+   * @throws Error if API request fails
+   */
   private async getGitHubBranches(token: string, repoFullName: string): Promise<string[]> {
     try {
       const response = await axios.get(`https://api.github.com/repos/${repoFullName}/branches`, {
@@ -362,6 +414,13 @@ export class OAuthService {
     }
   }
 
+  /**
+   * Fetch branches from GitLab API
+   * @param token - GitLab OAuth access token
+   * @param projectId - GitLab project ID or path
+   * @returns Array of branch names
+   * @throws Error if API request fails
+   */
   private async getGitLabBranches(token: string, projectId: string): Promise<string[]> {
     try {
       const response = await axios.get(`https://gitlab.com/api/v4/projects/${encodeURIComponent(projectId)}/repository/branches`, {
@@ -375,6 +434,13 @@ export class OAuthService {
     }
   }
 
+  /**
+   * Fetch branches from Bitbucket API
+   * @param token - Bitbucket OAuth access token
+   * @param repoFullName - Repository full name (owner/repo)
+   * @returns Array of branch names
+   * @throws Error if API request fails
+   */
   private async getBitbucketBranches(token: string, repoFullName: string): Promise<string[]> {
     try {
       const response = await axios.get(`https://api.bitbucket.org/2.0/repositories/${repoFullName}/refs/branches`, {
@@ -389,7 +455,10 @@ export class OAuthService {
   }
 
   /**
-   * Get authenticated clone URL
+   * Inject OAuth token into repository clone URL for authenticated access
+   * @param userId - User ID to retrieve token for
+   * @param repoUrl - Original repository clone URL
+   * @returns URL with embedded OAuth credentials, or original URL if token unavailable
    */
   getAuthenticatedCloneUrl(userId: number, repoUrl: string): string {
     const tokenData = this.getUserToken(userId);
@@ -422,7 +491,8 @@ export class OAuthService {
   }
 
   /**
-   * Disconnect OAuth
+   * Remove OAuth connection for user by clearing all OAuth-related fields
+   * @param userId - User ID to disconnect OAuth for
    */
   disconnectOAuth(userId: number): void {
     db.prepare(`
@@ -433,7 +503,10 @@ export class OAuthService {
   }
 
   /**
-   * Generate state parameter for OAuth flow
+   * Generate cryptographically secure state parameter for OAuth flow
+   * Encodes user ID, timestamp, and random bytes for verification
+   * @param userId - User ID to encode in state
+   * @returns Base64url-encoded state string
    */
   private generateState(userId: number): string {
     const timestamp = Date.now();
@@ -443,7 +516,10 @@ export class OAuthService {
   }
 
   /**
-   * Verify and decode state parameter
+   * Verify and decode OAuth state parameter
+   * Validates state format, checks expiration (10 minute timeout)
+   * @param state - Base64url-encoded state string from OAuth callback
+   * @returns Decoded user ID and timestamp, or null if invalid/expired
    */
   verifyState(state: string): { userId: number; timestamp: number } | null {
     try {
