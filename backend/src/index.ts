@@ -101,13 +101,17 @@ async function start() {
     // Start server
     await fastify.listen({ port: PORT, host: HOST });
     
+    const apiUrl = process.env.API_URL || `http://localhost:${PORT}`;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:9000';
+    
     console.log(`\n🚀 NodePilot Backend Running!`);
-    console.log(`📍 Backend API: http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`);
+    console.log(`📍 Backend API: ${apiUrl}`);
     console.log(`🔐 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`💾 Projects Dir: ${process.env.PROJECTS_DIR || './projects'}`);
-    console.log(`\n💡 To access frontend:`);
-    console.log(`   Option 1: Run frontend separately - cd ../frontend && npm run dev`);
-    console.log(`   Option 2: Use nginx to proxy both services\n`);
+    console.log(`\n💡 Access Options:`);
+    console.log(`   🌐 Frontend: ${frontendUrl}`);
+    console.log(`   📦 Standalone: npm run dev (in frontend folder)`);
+    console.log(`   🔀 Reverse Proxy: Use Caddy (see Caddyfile) or Nginx\n`);
 
     // Start background cleanup job for locked directories
     const projectsDir = process.env.PROJECTS_DIR || path.join(process.cwd(), '../projects');

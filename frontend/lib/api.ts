@@ -1,6 +1,27 @@
 import axios, { AxiosError } from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:9001/api';
+// Automatic API URL detection (Dokploy-style)
+const getApiUrl = () => {
+  // 1. Check environment variable (build-time or runtime)
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  
+  // 2. Browser runtime detection (for deployed apps)
+  if (typeof window !== 'undefined') {
+    const { protocol, hostname } = window.location;
+    
+    // If on custom domain/IP, use same host with API port
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return `${protocol}//${hostname}:9001/api`;
+    }
+  }
+  
+  // 3. Fallback to localhost (development)
+  return 'http://localhost:9001/api';
+};
+
+const API_URL = getApiUrl();
 
 export const api = axios.create({
   baseURL: API_URL,

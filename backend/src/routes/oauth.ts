@@ -2,6 +2,16 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { oauthService, OAuthProvider } from '../services/oauthService';
 import { authenticate } from '../middleware/auth';
 
+/**
+ * OAuth Integration Routes Module
+ * Handles OAuth authentication with Git providers (GitHub, GitLab, Bitbucket)
+ * Manages authorization flow, repository access, and connection status
+ */
+
+// ============================================================================
+// Type Definitions
+// ============================================================================
+
 interface AuthorizeParams {
   provider: OAuthProvider;
 }
@@ -26,10 +36,67 @@ interface BranchesQuery {
   repo: string;
 }
 
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Validates if the OAuth provider is supported
+ * @param provider - OAuth provider name
+ * @returns True if provider is valid
+ */
+function isValidProvider(provider: string): boolean {
+  return ['github', 'gitlab', 'bitbucket'].includes(provider);
+}
+
+/**
+ * Gets the frontend URL from environment
+ * @returns Frontend URL with default fallback
+ */
+function getFrontendUrl(): string {
+  return process.env.FRONTEND_URL || 'http://localhost:3000';
+}
+
+/**
+ * Builds redirect URL for OAuth errors
+ * @param error - Error message
+ * @returns Complete redirect URL
+ */
+function buildErrorRedirect(error: string): string {
+  return `${getFrontendUrl()}/settings?oauth_error=${encodeURIComponent(error)}`;
+}
+
+/**
+ * Builds redirect URL for OAuth success
+ * @param provider - OAuth provider name
+ * @returns Complete redirect URL
+ */
+function buildSuccessRedirect(provider: string): string {
+  return `${getFrontendUrl()}/settings?oauth_success=${provider}`;
+}
+
+/**
+ * Extracts user ID from request
+ * @param request - Fastify request object
+ * @returns User ID
+ */
+function getUserId(request: FastifyRequest): number {
+  return (request as any).userId;
+}
+
+// ============================================================================
+// Route Handlers
+// ============================================================================
+
+/**
+ * OAuth routes registration
+ */
 export default async function oauthRoutes(fastify: FastifyInstance) {
   /**
-   * Initiate OAuth authorization
-   * GET /api/oauth/authorize/:provider
+   * GET /authorize/:provider
+   * Initiates OAuth authorization flow with Git provider
+   * Requires authentication
+   * @returns Authorization URL for user to visit
    */
   fastify.get<{ Params: AuthorizeParams }>(
     '/authorize/:provider',
@@ -39,16 +106,16 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
     async (request: FastifyRequest<{ Params: AuthorizeParams }>, reply: FastifyReply) => {
       try {
         const { provider } = request.params;
-        const userId = (request as any).userId;
+        const userId = getUserId(request);
 
-        // Validate provider
-        if (!['github', 'gitlab', 'bitbucket'].includes(provider)) {
+        // Validate OAuth provider
+        if (!isValidProvider(provider)) {
           return reply.status(400).send({
             error: 'Invalid provider. Must be github, gitlab, or bitbucket',
           });
         }
 
-        // Get authorization URL
+        // Generate authorization URL with state parameter
         const authUrl = oauthService.getAuthorizationUrl(provider, userId);
 
         return reply.send({
@@ -65,8 +132,10 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
   );
 
   /**
-   * OAuth callback handler
-   * GET /api/oauth/callback/:provider
+   * GET /callback/:provider
+   * OAuth callback handler - receives authorization code and exchanges for access token
+   * No authentication required - this is the OAuth return URL
+   * @returns Redirect to frontend with success or error status
    */
   fastify.get<{ Params: CallbackParams; Querystring: CallbackQuery }>(
     '/callback/:provider',
@@ -78,59 +147,49 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
         const { provider } = request.params;
         const { code, state, error, error_description } = request.query;
 
-        // Handle OAuth errors
+        // Handle OAuth provider errors
         if (error) {
           console.error('OAuth error:', error, error_description);
-          return reply.redirect(
-            `${process.env.FRONTEND_URL || 'http://localhost:3000'}/settings?oauth_error=${encodeURIComponent(
-              error_description || error
-            )}`
-          );
+          return reply.redirect(buildErrorRedirect(error_description || error));
         }
 
-        // Validate required parameters
+        // Validate required OAuth parameters
         console.log('🔹 OAuth callback received:', { provider, hasCode: !!code, hasState: !!state });
         if (!code || !state) {
           console.log('❌ Missing code or state');
-          return reply.redirect(
-            `${process.env.FRONTEND_URL || 'http://localhost:3000'}/settings?oauth_error=missing_parameters`
-          );
+          return reply.redirect(buildErrorRedirect('missing_parameters'));
         }
 
-        // Verify state and extract user ID
+        // Verify state parameter to prevent CSRF attacks
         console.log('🔹 Verifying state...');
         const stateData = oauthService.verifyState(state);
         if (!stateData) {
           console.log('❌ State verification failed');
-          return reply.redirect(
-            `${process.env.FRONTEND_URL || 'http://localhost:3000'}/settings?oauth_error=invalid_state`
-          );
+          return reply.redirect(buildErrorRedirect('invalid_state'));
         }
         console.log('✅ State verified, user ID:', stateData.userId);
 
-        // Exchange code for token
+        // Exchange authorization code for access token
         console.log('🔹 Exchanging code for token...');
         await oauthService.exchangeCodeForToken(provider, code, stateData.userId);
         console.log('✅ Token exchange and save completed');
 
-        // Redirect to frontend success page
-        return reply.redirect(
-          `${process.env.FRONTEND_URL || 'http://localhost:3000'}/settings?oauth_success=${provider}`
-        );
+        // Redirect to frontend with success message
+        return reply.redirect(buildSuccessRedirect(provider));
       } catch (error: any) {
         console.error('OAuth callback error:', error);
-        return reply.redirect(
-          `${process.env.FRONTEND_URL || 'http://localhost:3000'}/settings?oauth_error=${encodeURIComponent(
-            error.message || 'authentication_failed'
-          )}`
-        );
+        return reply.redirect(buildErrorRedirect(error.message || 'authentication_failed'));
       }
     }
   );
 
   /**
-   * List user's repositories
-   * GET /api/oauth/repositories
+   * GET /repositories
+   * Lists user's accessible repositories from connected Git provider
+   * Requires authentication and OAuth connection
+   * @query page - Page number for pagination (default: 1)
+   * @query per_page - Results per page (default: 30)
+   * @returns Array of repositories with metadata
    */
   fastify.get<{ Querystring: RepoQuery }>(
     '/repositories',
@@ -139,10 +198,11 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest<{ Querystring: RepoQuery }>, reply: FastifyReply) => {
       try {
-        const userId = (request as any).userId;
+        const userId = getUserId(request);
         const page = request.query.page || 1;
         const perPage = request.query.per_page || 30;
 
+        // Fetch repositories from connected OAuth provider
         const repositories = await oauthService.listRepositories(userId, page, perPage);
 
         return reply.send({
@@ -153,7 +213,7 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
       } catch (error: any) {
         console.error('List repositories error:', error);
         
-        // Check if user needs to authenticate
+        // Check if user needs to connect OAuth provider first
         if (error.message.includes('not authenticated')) {
           return reply.status(401).send({
             error: error.message,
@@ -169,8 +229,11 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
   );
 
   /**
-   * Get repository branches
-   * GET /api/oauth/branches
+   * GET /branches
+   * Retrieves all branches for a specific repository
+   * Requires authentication and OAuth connection
+   * @query repo - Repository name (e.g., 'owner/repo')
+   * @returns Array of branch names
    */
   fastify.get<{ Querystring: BranchesQuery }>(
     '/branches',
@@ -179,7 +242,7 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest<{ Querystring: BranchesQuery }>, reply: FastifyReply) => {
       try {
-        const userId = (request as any).userId;
+        const userId = getUserId(request);
         const { repo } = request.query;
 
         if (!repo) {
@@ -188,6 +251,7 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
           });
         }
 
+        // Fetch branches from OAuth provider API
         const branches = await oauthService.getRepositoryBranches(userId, repo);
 
         return reply.send({
@@ -204,8 +268,10 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
   );
 
   /**
-   * Get OAuth connection status
-   * GET /api/oauth/status
+   * GET /status
+   * Checks if user has an active OAuth connection
+   * Requires authentication
+   * @returns Connection status and provider name
    */
   fastify.get(
     '/status',
@@ -214,7 +280,7 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const userId = (request as any).userId;
+        const userId = getUserId(request);
         const tokenData = oauthService.getUserToken(userId);
 
         if (!tokenData) {
@@ -238,8 +304,10 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
   );
 
   /**
-   * Disconnect OAuth
-   * POST /api/oauth/disconnect
+   * POST /disconnect
+   * Disconnects user's OAuth connection and removes stored tokens
+   * Requires authentication
+   * @returns Success message
    */
   fastify.post(
     '/disconnect',
@@ -248,7 +316,7 @@ export default async function oauthRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const userId = (request as any).userId;
+        const userId = getUserId(request);
         oauthService.disconnectOAuth(userId);
 
         return reply.send({
